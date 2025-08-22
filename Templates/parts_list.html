@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Parts List</title>
+</head>
+<body>
+    <h1>Parts Inventory</h1>
+    <ul>
+        {% for part in parts %}
+            <li>{{ part.name }} (SKU: {{ part.sku }}) - ${{ part.price }} | Stock: {{ part.stock }}</li>
+        {% endfor %}
+    </ul>
+    <p><a href="{{ url_for('add_part') }}">Add another part</a></p>
+    <p><a href="{{ url_for('index') }}">Back to Home</a></p>
+</body>
+</html>

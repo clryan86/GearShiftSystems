@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Part</title>
+</head>
+<body>
+    <h1>Add a New Part</h1>
+    <form method="POST">
+        <p>Name: <input type="text" name="name"></p>
+        <p>SKU: <input type="text" name="sku"></p>
+        <p>Price: <input type="number" step="0.01" name="price"></p>
+        <p>Stock: <input type="number" name="stock"></p>
+        <p><button type="submit">Add</button></p>
+    </form>
+    <p><a href="{{ url_for('list_parts') }}">Back to Parts List</a></p>
+</body>
+</html>
