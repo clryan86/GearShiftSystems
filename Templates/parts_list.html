@@ -1,16 +1,56 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Parts List</title>
-</head>
-<body>
-    <h1>Parts Inventory</h1>
-    <ul>
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="title">Parts Inventory</div>
+
+    <div class="toolbar" style="margin-bottom:12px">
+      <a class="btn" href="{{ url_for('list_parts') }}">All Parts</a>
+      <a class="btn" href="{{ url_for('list_parts', show='low') }}">Low Stock Only</a>
+      <a class="btn btn-accent" href="{{ url_for('add_part') }}">+ Add Part</a>
+      <form action="{{ url_for('reorder_low') }}" method="post" class="right" onsubmit="return confirm('Create a draft reorder for all low-stock items?');">
+        <button class="btn btn-warn" type="submit">Create Draft Reorder (Low Stock)</button>
+      </form>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Part</th>
+          <th>SKU</th>
+          <th>Price</th>
+          <th>Stock</th>
+          <th>Threshold</th>
+          <th>Shelf</th>
+          <th>Vendor</th>
+          <th style="width:230px">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
         {% for part in parts %}
-            <li>{{ part.name }} (SKU: {{ part.sku }}) - ${{ part.price }} | Stock: {{ part.stock }}</li>
+          <tr {% if part.is_low_stock %}style="background:rgba(239,68,68,.06)"{% endif %}>
+            <td>
+              {{ part.name }}
+              {% if part.is_low_stock %} <span class="badge badge-low">LOW</span>{% endif %}
+            </td>
+            <td class="muted">{{ part.sku }}</td>
+            <td>${{ '%.2f'|format(part.price) }}</td>
+            <td>{{ part.stock }}</td>
+            <td class="muted">{{ part.reorder_threshold }}</td>
+            <td>{{ part.shelf_location or '—' }}</td>
+            <td>{{ part.vendor.name if part.vendor else '—' }}</td>
+            <td class="row-actions">
+              <a class="btn btn-primary" href="{{ url_for('edit_part', part_id=part.id) }}">Edit</a>
+              <form action="{{ url_for('delete_part', part_id=part.id) }}" method="post" onsubmit="return confirm('Delete {{ part.name }}?');">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="muted">No parts yet — add your first one.</td>
+          </tr>
         {% endfor %}
-    </ul>
-    <p><a href="{{ url_for('add_part') }}">Add another part</a></p>
-    <p><a href="{{ url_for('index') }}">Back to Home</a></p>
-</body>
-</html>
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

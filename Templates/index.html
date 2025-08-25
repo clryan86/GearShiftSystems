@@ -1,11 +1,41 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>GearShift Systems</title>
-</head>
-<body>
-    <h1>Welcome to GearShift Systems</h1>
-    <p><a href="{{ url_for('list_parts') }}">View Parts Inventory</a></p>
-    <p><a href="{{ url_for('add_part') }}">Add a New Part</a></p>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="title">Welcome</div>
+      <p class="subtitle">Manage automotive parts, vendors, and low-stock alerts in a simple, focused workflow.</p>
+
+      {% if low_parts and low_parts|length > 0 %}
+        <div class="banner">
+          <strong>Low stock alert:</strong>
+          <div class="muted">These parts are at or below their reorder threshold:</div>
+          <ul>
+            {% for p in low_parts %}
+              <li>
+                <span class="badge badge-low">LOW</span>
+                {{ p.name }} (SKU: {{ p.sku }}) — stock: {{ p.stock }}, threshold: {{ p.reorder_threshold }}
+                {% if p.vendor %} · vendor: {{ p.vendor.name }}{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% else %}
+        <div class="card" style="background:#0d162c; border-color:#1e3a8a;">
+          ✅ Inventory looks healthy. No low-stock items right now.
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="title">Quick Actions</div>
+      <div class="toolbar">
+        <a class="btn btn-primary" href="{{ url_for('list_parts') }}">View Parts</a>
+        <a class="btn btn-accent" href="{{ url_for('add_part') }}">Add New Part</a>
+        <form action="{{ url_for('reorder_low') }}" method="post" class="right" onsubmit="return confirm('Create a draft reorder for all low-stock items?');">
+          <button class="btn btn-warn" type="submit">Create Draft Reorder (Low Stock)</button>
+        </form>
+      </div>
+      <p class="muted" style="margin-top:10px">Draft reorder will collect all low-stock items with suggested quantities.</p>
+    </div>
+  </div>
+{% endblock %}
