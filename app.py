@@ -1,161 +1,208 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-import config
-from models import db, Part, Vendor, Order, OrderItem
+import os
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash, Response
+)
+from models import db, Part, Vendor
 
+
+# -----------------------------
+# App Factory
+# -----------------------------
 def create_app():
     app = Flask(__name__)
-    app.config.from_object("config")
+    basedir = os.path.abspath(os.path.dirname(__file__))
+
+    app.config.update(
+        SQLALCHEMY_DATABASE_URI="sqlite:///" + os.path.join(basedir, "app.db"),
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SECRET_KEY="dev",  # replace in prod
+    )
     db.init_app(app)
 
-    # ---------- ROUTES ----------
-
+    # -----------------------------
+    # Home / Dashboard
+    # -----------------------------
     @app.route("/")
     def index():
         low_parts = Part.query.filter(Part.stock <= Part.reorder_threshold).all()
         return render_template("index.html", low_parts=low_parts)
 
-    # Parts: list (with optional low-stock filter)
-    @app.route("/parts")
+    # -----------------------------
+    # Parts – list / add / edit / delete / export
+    # -----------------------------
+    @app.route("/parts", methods=["GET"])
     def list_parts():
-        show = request.args.get("show")
-        if show == "low":
-            parts = Part.query.filter(Part.stock <= Part.reorder_threshold).order_by(Part.name).all()
-        else:
-            parts = Part.query.order_by(Part.name).all()
-        low_parts = [p for p in parts if p.is_low_stock]
-        return render_template("parts_list.html", parts=parts, low_parts=low_parts)
+        """List parts, with optional low-stock filter via ?low=1."""
+        low_only = request.args.get("low", type=int)
+        q = Part.query
+        if low_only == 1:
+            q = q.filter(Part.stock <= Part.reorder_threshold)
+        parts = q.order_by(Part.name.asc()).all()
+        return render_template("parts_list.html", parts=parts)
 
-    # Add a part
     @app.route("/parts/add", methods=["GET", "POST"])
     def add_part():
         if request.method == "POST":
-            name = (request.form.get("name") or "").strip()
-            sku = (request.form.get("sku") or "").strip()
-            price = float(request.form.get("price") or 0)
-            stock = int(request.form.get("stock") or 0)
-            reorder_threshold = int(request.form.get("reorder_threshold") or 5)
-            shelf_location = (request.form.get("shelf_location") or "").strip() or None
-            vendor_name = (request.form.get("vendor_name") or "").strip() or None
-
-            if not name or not sku:
-                flash("Name and SKU are required.", "error")
+            try:
+                price = float(request.form.get("price", "0") or 0)
+                stock = int(request.form.get("stock", "0") or 0)
+                threshold = int(request.form.get("reorder_threshold", "5") or 5)
+            except ValueError:
+                flash("Invalid number in Price/Stock/Threshold.", "warning")
                 return redirect(url_for("add_part"))
 
-            # find or create vendor by name (simple for Unit 2)
-            vendor = None
-            if vendor_name:
-                vendor = Vendor.query.filter_by(name=vendor_name).first()
-                if not vendor:
-                    vendor = Vendor(name=vendor_name)
-                    db.session.add(vendor)
+            vendor_id = request.form.get("vendor_id")
+            vendor_id = int(vendor_id) if vendor_id else None
 
-            part = Part(
-                name=name, sku=sku, price=price, stock=stock,
-                reorder_threshold=reorder_threshold, shelf_location=shelf_location,
-                vendor=vendor
+            p = Part(
+                name=request.form["name"].strip(),
+                sku=request.form["sku"].strip(),
+                price=price,
+                stock=stock,
+                shelf_location=(request.form.get("shelf_location") or "").strip(),
+                reorder_threshold=threshold,
+                vendor_id=vendor_id,
             )
-            db.session.add(part)
+            db.session.add(p)
             db.session.commit()
-            flash(f"Part '{name}' added.", "success")
+            flash("Part added!", "success")
             return redirect(url_for("list_parts"))
 
-            # GET
-        return render_template("add_part.html")
+        vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+        return render_template("add_part.html", vendors=vendors)
 
-    # Edit a part
     @app.route("/parts/<int:part_id>/edit", methods=["GET", "POST"])
     def edit_part(part_id):
         part = Part.query.get_or_404(part_id)
+
         if request.method == "POST":
-            part.name = (request.form.get("name") or "").strip()
-            part.sku = (request.form.get("sku") or "").strip()
-            part.price = float(request.form.get("price") or 0)
-            part.stock = int(request.form.get("stock") or 0)
-            part.reorder_threshold = int(request.form.get("reorder_threshold") or 5)
-            part.shelf_location = (request.form.get("shelf_location") or "").strip() or None
-
-            vendor_name = (request.form.get("vendor_name") or "").strip() or None
-            if vendor_name:
-                vendor = Vendor.query.filter_by(name=vendor_name).first()
-                if not vendor:
-                    vendor = Vendor(name=vendor_name)
-                    db.session.add(vendor)
-                part.vendor = vendor
-            else:
-                part.vendor = None
-
-            if not part.name or not part.sku:
-                flash("Name and SKU are required.", "error")
+            try:
+                part.price = float(request.form.get("price", "0") or 0)
+                part.stock = int(request.form.get("stock", "0") or 0)
+                part.reorder_threshold = int(request.form.get("reorder_threshold", "5") or 5)
+            except ValueError:
+                flash("Invalid number in Price/Stock/Threshold.", "warning")
                 return redirect(url_for("edit_part", part_id=part.id))
 
+            part.name = request.form["name"].strip()
+            part.sku = request.form["sku"].strip()
+            part.shelf_location = (request.form.get("shelf_location") or "").strip()
+
+            vendor_id = request.form.get("vendor_id")
+            part.vendor_id = int(vendor_id) if vendor_id else None
+
             db.session.commit()
-            flash(f"Part '{part.name}' updated.", "success")
+            flash("Part updated.", "success")
             return redirect(url_for("list_parts"))
 
-        return render_template("edit_part.html", part=part)
+        vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+        return render_template("edit_part.html", part=part, vendors=vendors)
 
-    # Delete a part
     @app.route("/parts/<int:part_id>/delete", methods=["POST"])
     def delete_part(part_id):
         part = Part.query.get_or_404(part_id)
         db.session.delete(part)
         db.session.commit()
-        flash("Part deleted.", "success")
+        flash("Part deleted.", "info")
         return redirect(url_for("list_parts"))
 
-    # Quick vendor list (optional page later)
-    @app.route("/api/vendors")
-    def api_vendors():
-        vendors = Vendor.query.order_by(Vendor.name).all()
-        data = [{"id": v.id, "name": v.name, "email": v.contact_email, "phone": v.phone} for v in vendors]
-        return jsonify(data)
+    @app.route("/parts/export", methods=["GET"])
+    def export_parts():
+        """Stream a CSV export of all parts."""
+        parts = Part.query.order_by(Part.name.asc()).all()
 
-    # JSON for parts (handy for screenshots/testing)
-    @app.route("/api/parts")
-    def api_parts():
-        parts = Part.query.order_by(Part.name).all()
-        data = []
-        for p in parts:
-            data.append({
-                "id": p.id,
-                "name": p.name,
-                "sku": p.sku,
-                "price": p.price,
-                "stock": p.stock,
-                "reorder_threshold": p.reorder_threshold,
-                "shelf_location": p.shelf_location,
-                "vendor": p.vendor.name if p.vendor else None,
-                "is_low_stock": p.is_low_stock,
-                "suggested_reorder_qty": p.suggested_reorder_qty(),
-            })
-        return jsonify(data)
+        def generate():
+            yield "name,sku,price,stock,reorder_threshold,shelf_location,vendor\n"
+            for p in parts:
+                vendor_name = p.vendor.name if p.vendor else ""
+                row = [
+                    (p.name or "").replace(",", " "),
+                    (p.sku or "").replace(",", " "),
+                    f"{float(p.price or 0):.2f}",
+                    str(int(p.stock or 0)),
+                    str(int(p.reorder_threshold or 0)),
+                    (p.shelf_location or "").replace(",", " "),
+                    vendor_name.replace(",", " "),
+                ]
+                yield ",".join(row) + "\n"
 
-    # One-click: draft a "reorder" in-memory (flash summary) for all low-stock items
-    @app.route("/reorder/low", methods=["POST"])
-    def reorder_low():
-        low_parts = Part.query.filter(Part.stock <= Part.reorder_threshold).all()
-        if not low_parts:
-            flash("No parts are currently under their reorder threshold.", "info")
-            return redirect(url_for("list_parts"))
+        return Response(
+            generate(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=parts.csv"},
+        )
 
-        # Create an order record (no detail page yet)
-        order = Order(status="draft")
-        db.session.add(order)
-        for p in low_parts:
-            qty = p.suggested_reorder_qty() or 1
-            item = OrderItem(order=order, part=p, qty=qty, unit_price=p.price)
-            db.session.add(item)
+    # -----------------------------
+    # Vendors – list / add / delete
+    # -----------------------------
+    @app.route("/vendors", methods=["GET"])
+    def list_vendors():
+        vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+        return render_template("vendors.html", vendors=vendors)
 
+    @app.route("/vendors/add", methods=["POST"])
+    def add_vendor():
+        name = (request.form.get("name") or "").strip()
+        email = (request.form.get("contact_email") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        if not name:
+            flash("Vendor name is required.", "warning")
+            return redirect(url_for("list_vendors"))
+
+        db.session.add(Vendor(name=name, contact_email=email, phone=phone))
         db.session.commit()
-        flash(f"Draft reorder created for {len(low_parts)} low-stock items (Order #{order.id}).", "success")
+        flash("Vendor added.", "success")
+        return redirect(url_for("list_vendors"))
+
+    @app.route("/vendors/<int:vendor_id>/delete", methods=["POST"])
+    def delete_vendor(vendor_id):
+        vendor = Vendor.query.get_or_404(vendor_id)
+        db.session.delete(vendor)
+        db.session.commit()
+        flash("Vendor deleted.", "info")
+        return redirect(url_for("list_vendors"))
+
+    # -----------------------------
+    # Draft Reorder (low-stock)
+    # -----------------------------
+    @app.route("/reorder/draft", methods=["GET", "POST"])
+    def draft_reorder():
+        """
+        POST: compute draft reorder (flash summary), redirect to parts.
+        GET: show a simple draft page listing low-stock items.
+        """
+        low = Part.query.filter(Part.stock <= Part.reorder_threshold).all()
+
+        if request.method == "GET":
+            return render_template("reorder_draft.html", items=low)
+
+        # POST path
+        if not low:
+            flash("No low-stock items detected. Inventory looks healthy!", "success")
+            return redirect(url_for("index"))
+
+        suggestions = []
+        for p in low:
+            # naive target: 2x threshold, at least +1 beyond current
+            target = max((p.reorder_threshold or 0) * 2, (p.stock or 0) + 1)
+            suggested = max(target - (p.stock or 0), 1)
+            suggestions.append((p, suggested))
+
+        flash("Draft reorder created (not placed yet):", "success")
+        for p, qty in suggestions:
+            vendor = p.vendor.name if p.vendor else "Unassigned vendor"
+            flash(f"{p.name} (SKU {p.sku}) → qty {qty} · {vendor}", "muted")
+
         return redirect(url_for("list_parts"))
 
     return app
 
 
+# -----------------------------
+# Dev Entrypoint
+# -----------------------------
 if __name__ == "__main__":
     app = create_app()
     with app.app_context():
         db.create_all()
-    # Run dev server
-    app.run(debug=config.DEBUG)
+    app.run(debug=True)

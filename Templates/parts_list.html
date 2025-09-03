@@ -1,56 +1,59 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card">
-    <div class="title">Parts Inventory</div>
+<div class="card">
+  <div class="title">Parts</div>
 
-    <div class="toolbar" style="margin-bottom:12px">
-      <a class="btn" href="{{ url_for('list_parts') }}">All Parts</a>
-      <a class="btn" href="{{ url_for('list_parts', show='low') }}">Low Stock Only</a>
-      <a class="btn btn-accent" href="{{ url_for('add_part') }}">+ Add Part</a>
-      <form action="{{ url_for('reorder_low') }}" method="post" class="right" onsubmit="return confirm('Create a draft reorder for all low-stock items?');">
-        <button class="btn btn-warn" type="submit">Create Draft Reorder (Low Stock)</button>
-      </form>
-    </div>
+  <div class="toolbar">
+    <a class="btn btn-primary" href="{{ url_for('add_part') }}">Add Part</a>
+    <a class="btn btn-accent" href="{{ url_for('list_parts') }}">All Parts</a>
+    <a class="btn btn-warn" href="{{ url_for('list_parts') }}?low=1">Low Stock Only</a>
+    <a class="btn" href="{{ url_for('export_parts') }}">Export CSV</a>
+  </div>
 
-    <table>
+  {% if parts|length == 0 %}
+    <p class="muted" style="margin-top:10px">No parts found.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="table">
       <thead>
         <tr>
-          <th>Part</th>
+          <th>Name</th>
           <th>SKU</th>
-          <th>Price</th>
-          <th>Stock</th>
-          <th>Threshold</th>
+          <th class="right">Price</th>
+          <th class="right">Stock</th>
+          <th class="right">Threshold</th>
           <th>Shelf</th>
           <th>Vendor</th>
-          <th style="width:230px">Actions</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
-        {% for part in parts %}
-          <tr {% if part.is_low_stock %}style="background:rgba(239,68,68,.06)"{% endif %}>
-            <td>
-              {{ part.name }}
-              {% if part.is_low_stock %} <span class="badge badge-low">LOW</span>{% endif %}
-            </td>
-            <td class="muted">{{ part.sku }}</td>
-            <td>${{ '%.2f'|format(part.price) }}</td>
-            <td>{{ part.stock }}</td>
-            <td class="muted">{{ part.reorder_threshold }}</td>
-            <td>{{ part.shelf_location or '—' }}</td>
-            <td>{{ part.vendor.name if part.vendor else '—' }}</td>
-            <td class="row-actions">
-              <a class="btn btn-primary" href="{{ url_for('edit_part', part_id=part.id) }}">Edit</a>
-              <form action="{{ url_for('delete_part', part_id=part.id) }}" method="post" onsubmit="return confirm('Delete {{ part.name }}?');">
-                <button class="btn btn-danger" type="submit">Delete</button>
-              </form>
-            </td>
-          </tr>
-        {% else %}
-          <tr>
-            <td colspan="8" class="muted">No parts yet — add your first one.</td>
-          </tr>
+        {% for p in parts %}
+        {% set is_low = p.stock <= p.reorder_threshold %}
+        <tr class="{{ 'row-low' if is_low }}">
+          <td>
+            {{ p.name }}
+            {% if is_low %}
+              <span class="badge badge-low" title="At/below threshold">LOW</span>
+            {% endif %}
+          </td>
+          <td>{{ p.sku }}</td>
+          <td class="right">${{ '%.2f'|format(p.price or 0) }}</td>
+          <td class="right">{{ p.stock }}</td>
+          <td class="right">{{ p.reorder_threshold }}</td>
+          <td>{{ p.shelf_location or '—' }}</td>
+          <td>{{ p.vendor.name if p.vendor else '—' }}</td>
+          <td class="right">
+            <a class="btn btn-small" href="{{ url_for('edit_part', part_id=p.id) }}">Edit</a>
+            <form action="{{ url_for('delete_part', part_id=p.id) }}" method="post" style="display:inline" onsubmit="return confirm('Delete this part?');">
+              <button type="submit" class="btn btn-small btn-warn">Delete</button>
+            </form>
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% endif %}
+</div>
 {% endblock %}
