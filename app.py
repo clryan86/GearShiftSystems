@@ -1,6 +1,8 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from models import db, Part, Vendor
+from paypal_mini import paypal_bp   # <-- [NEW] import the PayPal blueprint
+
 
 # -----------------------------
 # App Factory
@@ -15,6 +17,15 @@ def create_app():
         SECRET_KEY="dev",  # replace for production
     )
     db.init_app(app)
+
+    # ---- PayPal (minimal) ----------------------------------------------
+    # Defaults so it works out-of-the-box. Set PAYPAL_CLIENT_ID in env to override.
+    app.config.setdefault("PAYPAL_ENV", "sandbox")
+    app.config.setdefault("PAYPAL_CLIENT_ID", os.getenv("PAYPAL_CLIENT_ID", "sb"))
+    # Register the /buy/<part_id> route provided by paypal_mini.py
+    if "paypal" not in app.blueprints:
+        app.register_blueprint(paypal_bp)
+    # --------------------------------------------------------------------
 
     # -----------------------------
     # Home / Dashboard
