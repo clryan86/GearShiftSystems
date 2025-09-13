@@ -1,9 +1,6 @@
 import os
-from flask import (
-    Flask, render_template, request, redirect, url_for, flash, Response
-)
+from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from models import db, Part, Vendor
-
 
 # -----------------------------
 # App Factory
@@ -15,7 +12,7 @@ def create_app():
     app.config.update(
         SQLALCHEMY_DATABASE_URI="sqlite:///" + os.path.join(basedir, "app.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SECRET_KEY="dev",  # replace in prod
+        SECRET_KEY="dev",  # replace for production
     )
     db.init_app(app)
 
@@ -26,6 +23,21 @@ def create_app():
     def index():
         low_parts = Part.query.filter(Part.stock <= Part.reorder_threshold).all()
         return render_template("index.html", low_parts=low_parts)
+
+    # -----------------------------
+    # Contact (Sabir’s page)
+    # -----------------------------
+    @app.route("/contact", methods=["GET", "POST"])
+    def contact():
+        """
+        Simple contact page. If you add a form later, you can handle POST here.
+        Ensure templates/contact.html exists.
+        """
+        if request.method == "POST":
+            # Example placeholder: flash a message or persist the submission.
+            flash("Thanks! Your message was received.", "success")
+            return redirect(url_for("contact"))
+        return render_template("contact.html")
 
     # -----------------------------
     # Parts – list / add / edit / delete / export
