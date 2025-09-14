@@ -1,5 +1,7 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from models import db, Part, Vendor
 from paypal_mini import paypal_bp   # <-- [NEW] import the PayPal blueprint
 
@@ -19,10 +21,8 @@ def create_app():
     db.init_app(app)
 
     # ---- PayPal (minimal) ----------------------------------------------
-    # Defaults so it works out-of-the-box. Set PAYPAL_CLIENT_ID in env to override.
     app.config.setdefault("PAYPAL_ENV", "sandbox")
     app.config.setdefault("PAYPAL_CLIENT_ID", os.getenv("PAYPAL_CLIENT_ID", "sb"))
-    # Register the /buy/<part_id> route provided by paypal_mini.py
     if "paypal" not in app.blueprints:
         app.register_blueprint(paypal_bp)
     # --------------------------------------------------------------------
@@ -45,7 +45,6 @@ def create_app():
         Ensure templates/contact.html exists.
         """
         if request.method == "POST":
-            # Example placeholder: flash a message or persist the submission.
             flash("Thanks! Your message was received.", "success")
             return redirect(url_for("contact"))
         return render_template("contact.html")
@@ -55,9 +54,12 @@ def create_app():
     # -----------------------------
     @app.route("/parts", methods=["GET"])
     def list_parts():
-        """List parts, with optional low-stock filter via ?low=1."""
+        """
+        List parts, with optional low-stock filter via ?low=1.
+        Eager-load vendor so the template can safely show vendor names.
+        """
         low_only = request.args.get("low", type=int)
-        q = Part.query
+        q = Part.query.options(joinedload(Part.vendor))  # <-- eager-load
         if low_only == 1:
             q = q.filter(Part.stock <= Part.reorder_threshold)
         parts = q.order_by(Part.name.asc()).all()
@@ -66,60 +68,94 @@ def create_app():
     @app.route("/parts/add", methods=["GET", "POST"])
     def add_part():
         if request.method == "POST":
-            try:
-                price = float(request.form.get("price", "0") or 0)
-                stock = int(request.form.get("stock", "0") or 0)
-                threshold = int(request.form.get("reorder_threshold", "5") or 5)
-            except ValueError:
-                flash("Invalid number in Price/Stock/Threshold.", "warning")
-                return redirect(url_for("add_part"))
+            # Parse numbers safely
+            def _i(v, d=0):
+                try: return int(v)
+                except (TypeError, ValueError): return d
+            def _f(v, d=0.0):
+                try: return float(v)
+                except (TypeError, ValueError): return d
 
-            vendor_id = request.form.get("vendor_id")
-            vendor_id = int(vendor_id) if vendor_id else None
+            name = (request.form.get("name") or "").strip()
+            sku = (request.form.get("sku") or "").strip()
+
+            # PRE-CHECK: avoid IntegrityError on duplicate SKUs
+            if Part.query.filter_by(sku=sku).first():
+                flash(f"SKU '{sku}' already exists. Use Edit or choose another SKU.", "warning")
+                vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+                # Re-render with the user’s input preserved
+                return render_template("add_part.html", vendors=vendors, form=request.form)
+
+            price = _f(request.form.get("price", "0"))
+            stock = _i(request.form.get("stock", "0"))
+            threshold = _i(request.form.get("reorder_threshold", "5"), 5)
+            shelf = (request.form.get("shelf_location") or "").strip()
+
+            vendor_id_raw = request.form.get("vendor_id")
+            vendor_id = _i(vendor_id_raw, d=None) if vendor_id_raw else None
 
             p = Part(
-                name=request.form["name"].strip(),
-                sku=request.form["sku"].strip(),
+                name=name,
+                sku=sku,
                 price=price,
                 stock=stock,
-                shelf_location=(request.form.get("shelf_location") or "").strip(),
+                shelf_location=shelf,
                 reorder_threshold=threshold,
                 vendor_id=vendor_id,
             )
             db.session.add(p)
-            db.session.commit()
-            flash("Part added!", "success")
-            return redirect(url_for("list_parts"))
+            try:
+                db.session.commit()
+                flash("Part added!", "success")
+                return redirect(url_for("list_parts"))
+            except IntegrityError:
+                db.session.rollback()
+                flash("Database error while adding part.", "danger")
+                vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+                return render_template("add_part.html", vendors=vendors, form=request.form)
 
         vendors = Vendor.query.order_by(Vendor.name.asc()).all()
-        return render_template("add_part.html", vendors=vendors)
+        return render_template("add_part.html", vendors=vendors, form={})
 
     @app.route("/parts/<int:part_id>/edit", methods=["GET", "POST"])
     def edit_part(part_id):
         part = Part.query.get_or_404(part_id)
 
         if request.method == "POST":
-            try:
-                part.price = float(request.form.get("price", "0") or 0)
-                part.stock = int(request.form.get("stock", "0") or 0)
-                part.reorder_threshold = int(request.form.get("reorder_threshold", "5") or 5)
-            except ValueError:
-                flash("Invalid number in Price/Stock/Threshold.", "warning")
-                return redirect(url_for("edit_part", part_id=part.id))
+            # Parse numbers safely
+            def _i(v, d=0):
+                try: return int(v)
+                except (TypeError, ValueError): return d
+            def _f(v, d=0.0):
+                try: return float(v)
+                except (TypeError, ValueError): return d
 
-            part.name = request.form["name"].strip()
-            part.sku = request.form["sku"].strip()
+            name = (request.form.get("name") or "").strip()
+            new_sku = (request.form.get("sku") or "").strip()
+
+            # Prevent changing to a SKU used by *another* part
+            exists = Part.query.filter(Part.id != part.id, Part.sku == new_sku).first()
+            if exists:
+                flash(f"SKU '{new_sku}' is already used by another part.", "warning")
+                vendors = Vendor.query.order_by(Vendor.name.asc()).all()
+                return render_template("edit_part.html", part=part, vendors=vendors, form=request.form)
+
+            part.name = name
+            part.sku = new_sku
+            part.price = _f(request.form.get("price", "0"))
+            part.stock = _i(request.form.get("stock", "0"))
+            part.reorder_threshold = _i(request.form.get("reorder_threshold", "5"), 5)
             part.shelf_location = (request.form.get("shelf_location") or "").strip()
 
-            vendor_id = request.form.get("vendor_id")
-            part.vendor_id = int(vendor_id) if vendor_id else None
+            vendor_id_raw = request.form.get("vendor_id")
+            part.vendor_id = _i(vendor_id_raw, d=None) if vendor_id_raw else None
 
             db.session.commit()
             flash("Part updated.", "success")
             return redirect(url_for("list_parts"))
 
         vendors = Vendor.query.order_by(Vendor.name.asc()).all()
-        return render_template("edit_part.html", part=part, vendors=vendors)
+        return render_template("edit_part.html", part=part, vendors=vendors, form=None)
 
     @app.route("/parts/<int:part_id>/delete", methods=["POST"])
     def delete_part(part_id):
@@ -131,8 +167,12 @@ def create_app():
 
     @app.route("/parts/export", methods=["GET"])
     def export_parts():
-        """Stream a CSV export of all parts."""
-        parts = Part.query.order_by(Part.name.asc()).all()
+        """Stream a CSV export of all parts (with vendor names)."""
+        parts = (
+            Part.query.options(joinedload(Part.vendor))
+            .order_by(Part.name.asc())
+            .all()
+        )
 
         def generate():
             yield "name,sku,price,stock,reorder_threshold,shelf_location,vendor\n"
@@ -194,19 +234,19 @@ def create_app():
         POST: compute draft reorder (flash summary), redirect to parts.
         GET: show a simple draft page listing low-stock items.
         """
-        low = Part.query.filter(Part.stock <= Part.reorder_threshold).all()
+        low = Part.query.options(joinedload(Part.vendor)).filter(
+            Part.stock <= Part.reorder_threshold
+        ).all()
 
         if request.method == "GET":
             return render_template("reorder_draft.html", items=low)
 
-        # POST path
         if not low:
             flash("No low-stock items detected. Inventory looks healthy!", "success")
             return redirect(url_for("index"))
 
         suggestions = []
         for p in low:
-            # naive target: 2x threshold, at least +1 beyond current
             target = max((p.reorder_threshold or 0) * 2, (p.stock or 0) + 1)
             suggested = max(target - (p.stock or 0), 1)
             suggestions.append((p, suggested))
