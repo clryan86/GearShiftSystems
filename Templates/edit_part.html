@@ -1,51 +1,61 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card">
-    <div class="title">Edit Part</div>
-    <form method="post" action="{{ url_for('edit_part', part_id=part.id) }}">
-      <div class="row">
-        <div>
-          <label for="name">Part Name</label>
-          <input id="name" name="name" value="{{ part.name }}" required>
-        </div>
-        <div>
-          <label for="sku">SKU</label>
-          <input id="sku" name="sku" value="{{ part.sku }}" required>
-        </div>
-      </div>
+<div class="card">
+  <div class="title">Edit Part</div>
 
-      <div class="row">
-        <div>
-          <label for="price">Price</label>
-          <input id="price" name="price" type="number" step="0.01" min="0" value="{{ '%.2f'|format(part.price) }}">
-        </div>
-        <div>
-          <label for="stock">Stock</label>
-          <input id="stock" name="stock" type="number" min="0" value="{{ part.stock }}">
-        </div>
-      </div>
+  <form method="post" class="form-grid">
 
-      <div class="row">
-        <div>
-          <label for="reorder_threshold">Reorder Threshold</label>
-          <input id="reorder_threshold" name="reorder_threshold" type="number" min="0" value="{{ part.reorder_threshold }}">
-        </div>
-        <div>
-          <label for="shelf_location">Shelf Location</label>
-          <input id="shelf_location" name="shelf_location" value="{{ part.shelf_location }}">
-        </div>
-      </div>
+    <div class="form-row">
+      <label for="name">Name</label>
+      <input id="name" name="name" class="input" required
+             value="{{ (form.get('name') if form else part.name) | default('', true) }}">
+    </div>
 
-      <div class="row">
-        <div>
-          <label for="vendor_name">Vendor Name</label>
-          <input id="vendor_name" name="vendor_name" value="{{ part.vendor.name if part.vendor else '' }}">
-        </div>
-        <div>
-          <label>&nbsp;</label>
-          <button class="btn btn-accent" type="submit">Update Part</button>
-        </div>
-      </div>
-    </form>
-  </div>
+    <div class="form-row">
+      <label for="sku">SKU</label>
+      <input id="sku" name="sku" class="input" required
+             value="{{ (form.get('sku') if form else part.sku) | default('', true) }}">
+    </div>
+
+    <div class="form-row">
+      <label for="price">Price</label>
+      <input id="price" name="price" type="number" step="0.01" class="input"
+             value="{{ (form.get('price') if form else part.price) | default('', true) }}">
+    </div>
+
+    <div class="form-row">
+      <label for="stock">Stock</label>
+      <input id="stock" name="stock" type="number" class="input"
+             value="{{ (form.get('stock') if form else part.stock) | default('', true) }}">
+    </div>
+
+    <div class="form-row">
+      <label for="reorder_threshold">Reorder Threshold</label>
+      <input id="reorder_threshold" name="reorder_threshold" type="number" class="input"
+             value="{{ (form.get('reorder_threshold') if form else part.reorder_threshold) | default('5', true) }}">
+    </div>
+
+    <div class="form-row">
+      <label for="shelf_location">Shelf</label>
+      <input id="shelf_location" name="shelf_location" class="input"
+             value="{{ (form.get('shelf_location') if form else part.shelf_location) | default('', true) }}">
+    </div>
+
+    <div class="form-row">
+      <label for="vendor_id">Vendor</label>
+      <select id="vendor_id" name="vendor_id" class="input">
+        <option value="">— Select —</option>
+        {% for v in vendors %}
+          {% set selected = ( (form and (form.get('vendor_id')|int == v.id)) or (not form and part.vendor_id == v.id) ) %}
+          <option value="{{ v.id }}" {% if selected %}selected{% endif %}>{{ v.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn" href="{{ url_for('list_parts') }}">Cancel</a>
+    </div>
+  </form>
+</div>
 {% endblock %}
