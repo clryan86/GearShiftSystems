@@ -7,10 +7,12 @@
   <p class="muted">Streamline your automotive inventory management</p>
 
   <!-- Search bar -->
-  <form action="{{ url_for('list_parts') }}" method="get" class="mt-3">
-    <input type="text" name="search" placeholder="Search parts..."
-           style="padding:5px; border-radius:5px; border:1px solid #475569;">
+  <form action="{{ url_for('list_parts') }}" method="get" class="mt-3" style="display:flex; gap:8px; justify-content:center;">
+    <input type="text" name="q" placeholder="Search parts by name, SKU, or vendor…"
+           value="{{ request.args.get('q','') }}"
+           style="padding:5px; border-radius:5px; border:1px solid #475569; min-width:260px;">
     <button class="btn btn-accent" type="submit">Search</button>
+    <a class="btn btn-light" href="{{ url_for('list_parts') }}">Clear</a>
   </form>
 </div>
 
@@ -28,7 +30,7 @@
           <li class="mb-1">
             <span class="badge-low">LOW</span>
             {{ p.name }} (SKU: {{ p.sku }}) — stock: {{ p.stock }}, threshold: {{ p.reorder_threshold }}
-            {% if p.vendor %} · vendor: {{ p.vendor.name }}{% endif %}
+            · vendor: {{ p.vendor.name if p.vendor else '—' }}
           </li>
         {% endfor %}
       </ul>
@@ -46,12 +48,9 @@
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-primary" href="{{ url_for('list_parts') }}">View Parts</a>
     <a class="btn btn-accent" href="{{ url_for('add_part') }}">Add New Part</a>
-
-    <form action="{{ url_for('draft_reorder') }}" method="post" onsubmit="return confirm('Create a draft reorder for all low-stock items?');">
-      <button class="btn btn-warn" type="submit">Create Draft Reorder (Low Stock)</button>
-    </form>
+    <a class="btn btn-warn" href="{{ url_for('reorder_draft') }}">Create Draft Reorder (Low Stock)</a>
   </div>
-  <p class="muted mt-2">Draft reorder will collect all low-stock items with suggested quantities.</p>
+  <p class="muted mt-2">Draft reorder collects low-stock items with suggested quantities and lets you download a PO CSV.</p>
 </div>
 
 <!-- Footer Section -->

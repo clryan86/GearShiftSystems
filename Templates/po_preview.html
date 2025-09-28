@@ -1,10 +1,61 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="title">Purchase Order Preview</div>
+
+  {% for vendor_name in grouped.keys()|sort %}
+  <div class="subcard" style="margin-bottom:18px;">
+    <div class="subtitle">{{ vendor_name }}</div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Part</th>
+            <th>SKU</th>
+            <th class="right">Qty</th>
+            <th class="right">Unit Price</th>
+            <th class="right">Line Total</th>
+            <th>Shelf</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in grouped[vendor_name] %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td>{{ row.sku }}</td>
+            <td class="right">{{ row.qty }}</td>
+            <td class="right">${{ '%.2f'|format(row.unit_price) }}</td>
+            <td class="right">${{ '%.2f'|format(row.line_total) }}</td>
+            <td>{{ row.shelf_location or '—' }}</td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td colspan="4" class="right"><strong>Subtotal</strong></td>
+            <td class="right"><strong>${{ '%.2f'|format(vendor_totals[vendor_name]) }}</strong></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+
+  <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+    <div style="font-weight:bold; font-size:1.1em;">
+      Grand Total: ${{ '%.2f'|format(grand_total) }}
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('generate_po') }}" style="margin-top:12px;">
+    {% for vendor_name in grouped.keys() %}
+      {% for row in grouped[vendor_name] %}
+        <input type="hidden" name="part_id" value="{{ row.id }}">
+        <input type="hidden" name="qty_{{ row.id }}" value="{{ row.qty }}">
+      {% endfor %}
+    {% endfor %}
+    <button class="btn" type="submit" name="download" value="1">Download CSV</button>
+    <a class="btn btn-light" href="{{ url_for('reorder_draft') }}">Back to Draft</a>
+    <a class="btn btn-primary" href="{{ url_for('list_parts') }}">Done</a>
+  </form>
+</div>
+{% endblock %}

@@ -1,9 +1,12 @@
 import os
+from collections import defaultdict
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
+
 from models import db, Part, Vendor
-from paypal_mini import paypal_bp   # <-- [NEW] import the PayPal blueprint
+from paypal_mini import paypal_bp  # PayPal blueprint
 
 
 # -----------------------------
@@ -21,11 +24,17 @@ def create_app():
     db.init_app(app)
 
     # ---- PayPal (minimal) ----------------------------------------------
+    # If env var not set, default to "sb" sandbox so checkout page still renders.
     app.config.setdefault("PAYPAL_ENV", "sandbox")
     app.config.setdefault("PAYPAL_CLIENT_ID", os.getenv("PAYPAL_CLIENT_ID", "sb"))
     if "paypal" not in app.blueprints:
         app.register_blueprint(paypal_bp)
     # --------------------------------------------------------------------
+
+    # Quick health endpoint (optional)
+    @app.get("/healthz")
+    def healthz():
+        return {"ok": True}
 
     # -----------------------------
     # Home / Dashboard
@@ -40,10 +49,6 @@ def create_app():
     # -----------------------------
     @app.route("/contact", methods=["GET", "POST"])
     def contact():
-        """
-        Simple contact page. If you add a form later, you can handle POST here.
-        Ensure templates/contact.html exists.
-        """
         if request.method == "POST":
             flash("Thanks! Your message was received.", "success")
             return redirect(url_for("contact"))
@@ -55,20 +60,31 @@ def create_app():
     @app.route("/parts", methods=["GET"])
     def list_parts():
         """
-        List parts, with optional low-stock filter via ?low=1.
-        Eager-load vendor so the template can safely show vendor names.
+        Optional filters:
+          - ?q=<text> matches name, SKU, or vendor name (case-insensitive)
+          - ?low=1 shows only low-stock items
         """
+        q_text = (request.args.get("q") or "").strip()
         low_only = request.args.get("low", type=int)
-        q = Part.query.options(joinedload(Part.vendor))  # <-- eager-load
+
+        q = Part.query.options(joinedload(Part.vendor))  # eager-load vendor
+
+        if q_text:
+            like = f"%{q_text}%"
+            q = q.outerjoin(Vendor).filter(
+                or_(Part.name.ilike(like), Part.sku.ilike(like), Vendor.name.ilike(like))
+            )
+
         if low_only == 1:
             q = q.filter(Part.stock <= Part.reorder_threshold)
+
         parts = q.order_by(Part.name.asc()).all()
         return render_template("parts_list.html", parts=parts)
 
     @app.route("/parts/add", methods=["GET", "POST"])
     def add_part():
         if request.method == "POST":
-            # Parse numbers safely
+            # safe parsers
             def _i(v, d=0):
                 try: return int(v)
                 except (TypeError, ValueError): return d
@@ -79,11 +95,10 @@ def create_app():
             name = (request.form.get("name") or "").strip()
             sku = (request.form.get("sku") or "").strip()
 
-            # PRE-CHECK: avoid IntegrityError on duplicate SKUs
-            if Part.query.filter_by(sku=sku).first():
+            # avoid IntegrityError on duplicate SKUs
+            if sku and Part.query.filter_by(sku=sku).first():
                 flash(f"SKU '{sku}' already exists. Use Edit or choose another SKU.", "warning")
                 vendors = Vendor.query.order_by(Vendor.name.asc()).all()
-                # Re-render with the user’s input preserved
                 return render_template("add_part.html", vendors=vendors, form=request.form)
 
             price = _f(request.form.get("price", "0"))
@@ -95,13 +110,8 @@ def create_app():
             vendor_id = _i(vendor_id_raw, d=None) if vendor_id_raw else None
 
             p = Part(
-                name=name,
-                sku=sku,
-                price=price,
-                stock=stock,
-                shelf_location=shelf,
-                reorder_threshold=threshold,
-                vendor_id=vendor_id,
+                name=name, sku=sku, price=price, stock=stock,
+                shelf_location=shelf, reorder_threshold=threshold, vendor_id=vendor_id
             )
             db.session.add(p)
             try:
@@ -122,7 +132,6 @@ def create_app():
         part = Part.query.get_or_404(part_id)
 
         if request.method == "POST":
-            # Parse numbers safely
             def _i(v, d=0):
                 try: return int(v)
                 except (TypeError, ValueError): return d
@@ -133,9 +142,8 @@ def create_app():
             name = (request.form.get("name") or "").strip()
             new_sku = (request.form.get("sku") or "").strip()
 
-            # Prevent changing to a SKU used by *another* part
-            exists = Part.query.filter(Part.id != part.id, Part.sku == new_sku).first()
-            if exists:
+            # block SKU collision with OTHER parts
+            if new_sku and Part.query.filter(Part.id != part.id, Part.sku == new_sku).first():
                 flash(f"SKU '{new_sku}' is already used by another part.", "warning")
                 vendors = Vendor.query.order_by(Vendor.name.asc()).all()
                 return render_template("edit_part.html", part=part, vendors=vendors, form=request.form)
@@ -168,11 +176,7 @@ def create_app():
     @app.route("/parts/export", methods=["GET"])
     def export_parts():
         """Stream a CSV export of all parts (with vendor names)."""
-        parts = (
-            Part.query.options(joinedload(Part.vendor))
-            .order_by(Part.name.asc())
-            .all()
-        )
+        parts = Part.query.options(joinedload(Part.vendor)).order_by(Part.name.asc()).all()
 
         def generate():
             yield "name,sku,price,stock,reorder_threshold,shelf_location,vendor\n"
@@ -226,37 +230,119 @@ def create_app():
         return redirect(url_for("list_vendors"))
 
     # -----------------------------
-    # Draft Reorder (low-stock)
+    # Draft Reorder (low-stock) + PO generation
     # -----------------------------
-    @app.route("/reorder/draft", methods=["GET", "POST"])
-    def draft_reorder():
+    @app.route("/reorder/draft", methods=["GET", "POST"], endpoint="reorder_draft")
+    def reorder_draft():
         """
-        POST: compute draft reorder (flash summary), redirect to parts.
-        GET: show a simple draft page listing low-stock items.
+        GET: show draft page listing low-stock items with suggested quantities.
+        POST: same view (for compatibility); most submit actions go to /reorder/po.
         """
-        low = Part.query.options(joinedload(Part.vendor)).filter(
-            Part.stock <= Part.reorder_threshold
-        ).all()
+        items = (
+            Part.query.options(joinedload(Part.vendor))
+            .filter(Part.stock <= Part.reorder_threshold)
+            .order_by(Part.name.asc())
+            .all()
+        )
+        return render_template("reorder_draft.html", items=items)
 
-        if request.method == "GET":
-            return render_template("reorder_draft.html", items=low)
+    # Backward-compatible endpoint name used by older templates/forms
+    app.add_url_rule(
+        "/reorder/draft",
+        endpoint="draft_reorder",
+        view_func=reorder_draft,
+        methods=["POST"],
+    )
 
-        if not low:
-            flash("No low-stock items detected. Inventory looks healthy!", "success")
-            return redirect(url_for("index"))
+    @app.route("/reorder/po", methods=["POST"])
+    def generate_po():
+        """
+        Build a grouped Purchase Order from selected items posted by reorder_draft.html.
+        If 'download' is present in the form, return CSV; otherwise show a preview page.
+        """
+        selected_ids = request.form.getlist("part_id")
+        if not selected_ids:
+            flash("No items selected for PO.", "warning")
+            return redirect(url_for("reorder_draft"))
 
-        suggestions = []
-        for p in low:
-            target = max((p.reorder_threshold or 0) * 2, (p.stock or 0) + 1)
-            suggested = max(target - (p.stock or 0), 1)
-            suggestions.append((p, suggested))
+        # map id->qty from posted fields like qty_<id>
+        qty_map = {}
+        for pid in selected_ids:
+            q = request.form.get(f"qty_{pid}", "").strip()
+            try:
+                qty_map[int(pid)] = max(int(q), 0)
+            except (TypeError, ValueError):
+                qty_map[int(pid)] = 0
 
-        flash("Draft reorder created (not placed yet):", "success")
-        for p, qty in suggestions:
-            vendor = p.vendor.name if p.vendor else "Unassigned vendor"
-            flash(f"{p.name} (SKU {p.sku}) → qty {qty} · {vendor}", "muted")
+        parts = (
+            Part.query.options(joinedload(Part.vendor))
+            .filter(Part.id.in_(qty_map.keys()))
+            .order_by(Part.name.asc())
+            .all()
+        )
 
-        return redirect(url_for("list_parts"))
+        grouped = defaultdict(list)
+        vendor_totals = defaultdict(float)
+        grand_total = 0.0
+
+        for p in parts:
+            qty = qty_map.get(p.id, 0)
+            if qty <= 0:
+                continue
+            vendor_name = p.vendor.name if p.vendor else "Unassigned vendor"
+            unit_price = float(p.price or 0)
+            line_total = unit_price * qty
+            grouped[vendor_name].append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "sku": p.sku,
+                    "shelf_location": p.shelf_location,
+                    "qty": qty,
+                    "unit_price": unit_price,
+                    "line_total": line_total,
+                }
+            )
+            vendor_totals[vendor_name] += line_total
+            grand_total += line_total
+
+        if not grouped:
+            flash("All selected items had zero quantity. Please adjust and try again.", "warning")
+            return redirect(url_for("reorder_draft"))
+
+        # CSV download?
+        if request.form.get("download"):
+            def gen_csv():
+                yield "vendor,part,sku,qty,unit_price,line_total,shelf\n"
+                for vendor_name in sorted(grouped.keys()):
+                    for row in grouped[vendor_name]:
+                        yield ",".join(
+                            [
+                                vendor_name.replace(",", " "),
+                                (row["name"] or "").replace(",", " "),
+                                (row["sku"] or "").replace(",", " "),
+                                str(row["qty"]),
+                                f"{row['unit_price']:.2f}",
+                                f"{row['line_total']:.2f}",
+                                (row["shelf_location"] or "").replace(",", " "),
+                            ]
+                        ) + "\n"
+                    yield f"{vendor_name},SUBTOTAL,,,,{vendor_totals[vendor_name]:.2f},\n"
+                yield f"ALL,GRAND TOTAL,,,,{grand_total:.2f},\n"
+
+            return Response(
+                gen_csv(),
+                mimetype="text/csv",
+                headers={"Content-Disposition": "attachment; filename=purchase_order.csv"},
+            )
+
+        # Otherwise show a preview page
+        return render_template(
+            "po_preview.html",
+            grouped=grouped,
+            vendor_totals=vendor_totals,
+            grand_total=grand_total,
+        )
 
     return app
 

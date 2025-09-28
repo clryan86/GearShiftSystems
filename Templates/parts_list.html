@@ -7,16 +7,24 @@
 </a>
 
 <div class="card">
-
-
-
   <div class="title">Parts</div>
 
-  <div class="toolbar" style="margin-bottom:10px;">
+  <div class="toolbar" style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <a class="btn btn-primary" href="{{ url_for('add_part') }}">Add Part</a>
-    <a class="btn btn-light" href="{{ url_for('list_parts') }}">All Parts</a>
-    <a class="btn btn-warn" href="{{ url_for('list_parts') }}?low=1">Low Stock Only</a>
     <a class="btn btn-light" href="{{ url_for('export_parts') }}">Export CSV</a>
+
+    <form method="get" action="{{ url_for('list_parts') }}" style="display:flex; gap:6px; align-items:center;">
+      <input class="input" type="text" name="q" placeholder="Search name, SKU, vendor"
+             value="{{ request.args.get('q','') }}" style="min-width:220px;">
+      <label style="display:flex; gap:4px; align-items:center;">
+        <input type="checkbox" name="low" value="1" {% if request.args.get('low') == '1' %}checked{% endif %}>
+        Low Stock Only
+      </label>
+      <button class="btn btn-accent" type="submit">Filter</button>
+      <a class="btn btn-light" href="{{ url_for('list_parts') }}">Clear</a>
+    </form>
+
+    <a class="btn btn-warn" href="{{ url_for('reorder_draft') }}">Draft Reorder</a>
   </div>
 
   {% if parts|length == 0 %}
@@ -38,16 +46,13 @@
       </thead>
       <tbody>
         {% for p in parts %}
-        {% set stock_val = (p.stock|default(0, true))|int %}
+        {% set stock_val  = (p.stock|default(0, true))|int %}
         {% set thresh_val = (p.reorder_threshold|default(0, true))|int %}
-        {% set is_low = stock_val <= thresh_val %}
+        {% set is_low     = stock_val <= thresh_val %}
+        {% set price_val  = (p.price|default(0, true))|float %}
         {% set vendor_label =
-            (p.vendor and (p.vendor.name or p.vendor.company_name)) or
-            p.vendor_name or
-            (vendors_by_id and p.vendor_id and vendors_by_id.get(p.vendor_id) and (vendors_by_id.get(p.vendor_id).name or vendors_by_id.get(p.vendor_id).company_name)) or
-            p.vendor_id or
-            '—'
-        %}
+             (p.vendor and (p.vendor.name or p.vendor.company_name)) or
+             p.vendor_name or '—' %}
         <tr class="{{ 'row-low' if is_low }}">
           <td>
             {{ p.name }}
@@ -55,16 +60,28 @@
             <div class="muted small">SKU: {{ p.sku }}</div>
           </td>
           <td>{{ p.sku }}</td>
-          <td class="right">${{ '%.2f'|format((p.price|default(0, true))|float) }}</td>
+          <td class="right">${{ '%.2f'|format(price_val) }}</td>
           <td class="right">{{ stock_val }}</td>
           <td class="right">{{ thresh_val }}</td>
           <td>{{ p.shelf_location|default('—', true) }}</td>
           <td>{{ vendor_label }}</td>
-          <td class="right">
+          <td class="right" style="display:flex; gap:6px; justify-content:flex-end;">
             <a class="btn btn-small" href="{{ url_for('edit_part', part_id=p.id) }}">Edit</a>
-            <form action="{{ url_for('delete_part', part_id=p.id) }}" method="post" style="display:inline" onsubmit="return confirm('Delete this part?');">
+
+            <form action="{{ url_for('delete_part', part_id=p.id) }}"
+                  method="post" style="display:inline"
+                  onsubmit="return confirm('Delete this part?');">
               <button type="submit" class="btn btn-small btn-warn">Delete</button>
             </form>
+
+            {# Show Buy button only when in stock; otherwise show disabled #}
+            {% if stock_val > 0 %}
+              <a class="btn btn-small btn-success"
+                 href="{{ url_for('paypal.buy', part_id=p.id) }}">Buy</a>
+            {% else %}
+              <button class="btn btn-small" disabled
+                      title="Out of stock">Buy</button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

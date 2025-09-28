@@ -1,39 +1,56 @@
 {% extends "base.html" %}
 {% block content %}
+
+<a class="btn mb-3" href="{{ url_for('list_parts') }}"
+   style="background:#1e293b; color:#38bdf8; border:1px solid #334155;">
+  ⬅️ Back to Parts
+</a>
+
 <div class="card">
   <div class="title">Checkout</div>
 
-  <p class="muted">
-    You're purchasing: <strong>{{ part.name }}</strong> (SKU: {{ part.sku }})
-  </p>
-  <p>
-    Price: ${{ "%.2f"|format(part.price) }} &nbsp; | &nbsp; Stock: {{ part.stock }}
-  </p>
+  <p>You are buying: <strong>{{ part.name }}</strong></p>
+  <p>SKU: {{ part.sku }}</p>
+  <p>Price: ${{ "%.2f"|format((part.price or 0.0)|float) }}</p>
 
-  <div id="paypal-button-container" class="mt-3"></div>
-  <div id="status" class="mt-3"></div>
+  <hr>
+
+  {# If PAYPAL_CLIENT_ID is configured, load the SDK; otherwise show a notice #}
+  {% if paypal_client_id %}
+    <div id="paypal-container" class="mt-2"></div>
+    <div class="muted small mt-2">
+      Sandbox mode using client ID: <code>{{ paypal_client_id }}</code>
+    </div>
+
+    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency=USD"></script>
+    <script>
+      // Minimal placeholder integration; replace with real order creation/capture later.
+      if (window.paypal) {
+        paypal.Buttons({
+          createOrder: function (data, actions) {
+            return actions.order.create({
+              purchase_units: [{
+                description: "{{ part.name|e }} (SKU: {{ part.sku|e }})",
+                amount: { value: "{{ '%.2f'|format((part.price or 0.0)|float) }}" }
+              }]
+            });
+          },
+          onApprove: function (data, actions) {
+            return actions.order.capture().then(function (details) {
+              alert('Payment completed by ' + details.payer.name.given_name + ' (demo).');
+              window.location = "{{ url_for('list_parts') }}";
+            });
+          }
+        }).render('#paypal-container');
+      }
+    </script>
+  {% else %}
+    <p class="muted">
+      PayPal Client ID is not configured. Ask your admin to set <code>PAYPAL_CLIENT_ID</code>
+      in app config to enable the checkout button.
+    </p>
+    <button class="btn" disabled>Proceed with Payment</button>
+  {% endif %}
 </div>
 
-<!-- Sandbox works instantly with client-id=sb -->
-<script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency=USD&intent=capture"></script>
-<script>
-paypal.Buttons({
-  style: { layout: 'vertical', shape: 'rect' },
-  createOrder: (data, actions) => actions.order.create({
-    purchase_units: [{
-      description: '{{ part.name }} ({{ part.sku }})',
-      amount: { value: '{{ "%.2f"|format(part.price) }}' }
-    }]
-  }),
-  onApprove: (data, actions) => actions.order.capture().then(details => {
-    document.getElementById('status').innerHTML =
-      '<div class="alert alert-success">✅ Payment ' + (details.status || 'OK') +
-      '. Thanks, ' + ((details.payer && details.payer.name && details.payer.name.given_name) || 'buyer') + '!</div>';
-  }),
-  onError: err => {
-    document.getElementById('status').innerHTML =
-      '<div class="alert alert-danger">❌ ' + (err && err.message ? err.message : err) + '</div>';
-  }
-}).render('#paypal-button-container');
-</script>
 {% endblock %}
