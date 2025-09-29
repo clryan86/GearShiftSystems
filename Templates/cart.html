@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<a class="btn mb-3" href="{{ url_for('list_parts') }}"
+   style="background:#1e293b; color:#38bdf8; border:1px solid #334155;">
+  ⬅️ Back to Parts
+</a>
+
+<div class="card">
+  <div class="title">Your Cart</div>
+
+  {% if items|length == 0 %}
+    <p class="muted">Cart is empty.</p>
+  {% else %}
+    <form method="post" action="{{ url_for('cart.update_cart') }}">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>SKU</th>
+              <th class="right">Price</th>
+              <th class="right">Qty</th>
+              <th class="right">Line Total</th>
+              <th class="right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for part, qty, line in items %}
+            <tr>
+              <td>{{ part.name }}</td>
+              <td>{{ part.sku }}</td>
+              <td class="right">${{ '%.2f'|format((part.price or 0.0)|float) }}</td>
+              <td class="right" style="max-width:80px;">
+                <input type="hidden" name="ids[]" value="{{ part.id }}">
+                <input class="form-control form-control-sm text-end"
+                       type="number" min="0" max="{{ part.stock }}"
+                       name="qtys[]" value="{{ qty }}">
+              </td>
+              <td class="right">${{ '%.2f'|format(line) }}</td>
+              <td class="right">
+                <form method="post" action="{{ url_for('cart.remove', part_id=part.id) }}">
+                  <button class="btn btn-small btn-warn">Remove</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="4" class="right">Subtotal</th>
+              <th class="right">${{ '%.2f'|format(subtotal) }}</th>
+              <th></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+        <button class="btn btn-light" type="submit" name="qty" value="1">Update Cart</button>
+        <a class="btn btn-accent" href="{{ url_for('cart.checkout_view') }}">Proceed to Checkout</a>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
