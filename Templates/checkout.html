@@ -1,55 +1,57 @@
 {% extends "base.html" %}
 {% block content %}
 
-<a class="btn mb-3" href="{{ url_for('list_parts') }}"
+<a class="btn mb-3" href="{{ url_for('cart.view_cart') }}"
    style="background:#1e293b; color:#38bdf8; border:1px solid #334155;">
-  ⬅️ Back to Parts
+  ⬅️ Back to Cart
 </a>
 
 <div class="card">
   <div class="title">Checkout</div>
 
-  <p>You are buying: <strong>{{ part.name }}</strong></p>
-  <p>SKU: {{ part.sku }}</p>
-  <p>Price: ${{ "%.2f"|format((part.price or 0.0)|float) }}</p>
-
-  <hr>
-
-  {# If PAYPAL_CLIENT_ID is configured, load the SDK; otherwise show a notice #}
-  {% if paypal_client_id %}
-    <div id="paypal-container" class="mt-2"></div>
-    <div class="muted small mt-2">
-      Sandbox mode using client ID: <code>{{ paypal_client_id }}</code>
+  {% if items|length == 0 %}
+    <p class="muted">Your cart is empty.</p>
+  {% else %}
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>SKU</th>
+            <th class="right">Price</th>
+            <th class="right">Qty</th>
+            <th class="right">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for part, qty, line in items %}
+          <tr>
+            <td>{{ part.name }}</td>
+            <td>{{ part.sku }}</td>
+            <td class="right">${{ '%.2f'|format((part.price or 0.0)|float) }}</td>
+            <td class="right">{{ qty }}</td>
+            <td class="right">${{ '%.2f'|format(line) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="4" class="right">Total</th>
+            <th class="right">${{ '%.2f'|format(subtotal) }}</th>
+          </tr>
+        </tfoot>
+      </table>
     </div>
 
-    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency=USD"></script>
-    <script>
-      // Minimal placeholder integration; replace with real order creation/capture later.
-      if (window.paypal) {
-        paypal.Buttons({
-          createOrder: function (data, actions) {
-            return actions.order.create({
-              purchase_units: [{
-                description: "{{ part.name|e }} (SKU: {{ part.sku|e }})",
-                amount: { value: "{{ '%.2f'|format((part.price or 0.0)|float) }}" }
-              }]
-            });
-          },
-          onApprove: function (data, actions) {
-            return actions.order.capture().then(function (details) {
-              alert('Payment completed by ' + details.payer.name.given_name + ' (demo).');
-              window.location = "{{ url_for('list_parts') }}";
-            });
-          }
-        }).render('#paypal-container');
-      }
-    </script>
-  {% else %}
-    <p class="muted">
-      PayPal Client ID is not configured. Ask your admin to set <code>PAYPAL_CLIENT_ID</code>
-      in app config to enable the checkout button.
+    <!-- Simple confirmation path: posts to cart.checkout_submit which decrements stock,
+         clears the cart, and flashes a PayPal-style confirmation message. -->
+    <form method="post" action="{{ url_for('cart.checkout_submit') }}" style="margin-top:12px;">
+      <button class="btn btn-accent" type="submit">Confirm Purchase with PayPal</button>
+    </form>
+
+    <p class="muted" style="margin-top:8px;">
+      On confirmation, your order is marked as paid via PayPal (sandbox) and inventory is updated.
     </p>
-    <button class="btn" disabled>Proceed with Payment</button>
   {% endif %}
 </div>
 
