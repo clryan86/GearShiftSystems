@@ -25,6 +25,8 @@
     </form>
 
     <a class="btn btn-warn" href="{{ url_for('reorder_draft') }}">Draft Reorder</a>
+    <!-- Cart shortcut -->
+    <a class="btn btn-accent" href="{{ url_for('cart.view_cart') }}">🛒 Cart ({{ cart_count or 0 }})</a>
   </div>
 
   {% if parts|length == 0 %}
@@ -56,7 +58,7 @@
         <tr class="{{ 'row-low' if is_low }}">
           <td>
             {{ p.name }}
-            {% if is_low %}<span class="badge badge-low" title="At/below threshold">LOW</span>{% endif %}
+            {% if is_low %}<span class="badge-low">Low</span>{% endif %}
             <div class="muted small">SKU: {{ p.sku }}</div>
           </td>
           <td>{{ p.sku }}</td>
@@ -65,7 +67,7 @@
           <td class="right">{{ thresh_val }}</td>
           <td>{{ p.shelf_location|default('—', true) }}</td>
           <td>{{ vendor_label }}</td>
-          <td class="right" style="display:flex; gap:6px; justify-content:flex-end;">
+          <td class="right" style="display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">
             <a class="btn btn-small" href="{{ url_for('edit_part', part_id=p.id) }}">Edit</a>
 
             <form action="{{ url_for('delete_part', part_id=p.id) }}"
@@ -74,13 +76,12 @@
               <button type="submit" class="btn btn-small btn-warn">Delete</button>
             </form>
 
-            {# Show Buy button only when in stock; otherwise show disabled #}
             {% if stock_val > 0 %}
+              <!-- Add to session cart -->
               <a class="btn btn-small btn-success"
-                 href="{{ url_for('paypal.buy', part_id=p.id) }}">Buy</a>
+                 href="{{ url_for('cart.add', part_id=p.id) }}">Add to Cart</a>
             {% else %}
-              <button class="btn btn-small" disabled
-                      title="Out of stock">Buy</button>
+              <button class="btn btn-small" disabled title="Out of stock">Add to Cart</button>
             {% endif %}
           </td>
         </tr>
