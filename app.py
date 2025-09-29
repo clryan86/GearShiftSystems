@@ -1,12 +1,13 @@
 import os
 from collections import defaultdict
-from flask import Flask, render_template, request, redirect, url_for, flash, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from models import db, Part, Vendor
-from paypal_mini import paypal_bp  # PayPal blueprint
+from paypal_mini import paypal_bp            # existing PayPal mini blueprint
+from cart import cart_bp                     # <-- NEW: session cart blueprint you added
 
 
 # -----------------------------
@@ -24,14 +25,32 @@ def create_app():
     db.init_app(app)
 
     # ---- PayPal (minimal) ----------------------------------------------
-    # If env var not set, default to "sb" sandbox so checkout page still renders.
+    # If env var not set, default to "sb" sandbox so pages still render.
     app.config.setdefault("PAYPAL_ENV", "sandbox")
     app.config.setdefault("PAYPAL_CLIENT_ID", os.getenv("PAYPAL_CLIENT_ID", "sb"))
     if "paypal" not in app.blueprints:
         app.register_blueprint(paypal_bp)
     # --------------------------------------------------------------------
 
-    # Quick health endpoint (optional)
+    # ---- Cart (session-based) ------------------------------------------
+    # Provides: /cart, /cart/add/<id>, /cart/checkout, POST /cart/checkout
+    if "cart" not in app.blueprints:
+        app.register_blueprint(cart_bp)
+
+    # Make cart item count available to all templates
+    @app.app_context_processor
+    def inject_cart_count_global():
+        cart = session.get("cart") or {}
+        total_qty = 0
+        for q in cart.values():
+            try:
+                total_qty += int(q)
+            except Exception:
+                pass
+        return {"cart_count": total_qty}
+    # --------------------------------------------------------------------
+
+    # Quick health endpoint
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
@@ -45,7 +64,7 @@ def create_app():
         return render_template("index.html", low_parts=low_parts)
 
     # -----------------------------
-    # Contact (Sabir’s page)
+    # Contact
     # -----------------------------
     @app.route("/contact", methods=["GET", "POST"])
     def contact():
@@ -86,11 +105,16 @@ def create_app():
         if request.method == "POST":
             # safe parsers
             def _i(v, d=0):
-                try: return int(v)
-                except (TypeError, ValueError): return d
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return d
+
             def _f(v, d=0.0):
-                try: return float(v)
-                except (TypeError, ValueError): return d
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return d
 
             name = (request.form.get("name") or "").strip()
             sku = (request.form.get("sku") or "").strip()
@@ -110,8 +134,13 @@ def create_app():
             vendor_id = _i(vendor_id_raw, d=None) if vendor_id_raw else None
 
             p = Part(
-                name=name, sku=sku, price=price, stock=stock,
-                shelf_location=shelf, reorder_threshold=threshold, vendor_id=vendor_id
+                name=name,
+                sku=sku,
+                price=price,
+                stock=stock,
+                shelf_location=shelf,
+                reorder_threshold=threshold,
+                vendor_id=vendor_id,
             )
             db.session.add(p)
             try:
@@ -133,11 +162,16 @@ def create_app():
 
         if request.method == "POST":
             def _i(v, d=0):
-                try: return int(v)
-                except (TypeError, ValueError): return d
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return d
+
             def _f(v, d=0.0):
-                try: return float(v)
-                except (TypeError, ValueError): return d
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return d
 
             name = (request.form.get("name") or "").strip()
             new_sku = (request.form.get("sku") or "").strip()
