@@ -1,16 +1,20 @@
-# Ignore PyCharm/IDE settings
-.idea/
+﻿# DB
+app.db
+*.sqlite3
 
-# Ignore Python cache and compiled files
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Ignore virtual environments
+# Envs
 venv/
-.env/
+.env
 
-# Ignore OS files
+# IDE
+.idea/
+
+# OS
 .DS_Store
 Thumbs.db

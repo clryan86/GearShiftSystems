@@ -125,4 +125,4 @@ def checkout_submit():
 
     flash("Order placed. Inventory updated.", "success")
     return redirect(url_for("list_parts"))
-vvvv
+

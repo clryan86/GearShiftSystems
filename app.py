@@ -38,7 +38,7 @@ def create_app():
         app.register_blueprint(cart_bp)
 
     # Make cart item count available to all templates
-    @app.app_context_processor
+    @app.context_processor   # <<< fixed here
     def inject_cart_count_global():
         cart = session.get("cart") or {}
         total_qty = 0
