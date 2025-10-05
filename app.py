@@ -5,9 +5,61 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
-from models import db, Part, Vendor
+# ⬇️ ADDED: import Order, OrderItem (keeps your existing imports intact)
+from models import db, Part, Vendor, Order, OrderItem
 from paypal_mini import paypal_bp            # existing PayPal mini blueprint
 from cart import cart_bp                     # <-- NEW: session cart blueprint you added
+
+
+# -----------------------------
+# ⬇️ ADDED: SQLite autopatch helper (non-destructive)
+# -----------------------------
+def _sqlite_autopatch(engine):
+    """
+    Non-destructive shim for SQLite: ensures newly-added columns exist on 'orders'
+    (and optionally 'order_items'). Safe to run multiple times. Keeps your data.
+    """
+    with engine.connect() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        # --- Patch 'orders' table ---
+        res = conn.exec_driver_sql("PRAGMA table_info('orders');")
+        order_cols = {row[1] for row in res.fetchall()}
+
+        stmts = []
+        if "buyer_name" not in order_cols:
+            stmts.append("ALTER TABLE orders ADD COLUMN buyer_name VARCHAR(120)")
+        if "buyer_email" not in order_cols:
+            stmts.append("ALTER TABLE orders ADD COLUMN buyer_email VARCHAR(255)")
+        if "status" not in order_cols:
+            stmts.append("ALTER TABLE orders ADD COLUMN status VARCHAR(32) DEFAULT 'paid' NOT NULL")
+        if "total_amount" not in order_cols:
+            stmts.append("ALTER TABLE orders ADD COLUMN total_amount FLOAT DEFAULT 0.0 NOT NULL")
+
+        for sql in stmts:
+            conn.exec_driver_sql(sql)
+
+        # --- (Optional) Patch 'order_items' table in case it pre-existed without snapshots ---
+        res_items = conn.exec_driver_sql("PRAGMA table_info('order_items');")
+        item_cols = {row[1] for row in res_items.fetchall()}
+
+        item_stmts = []
+        # These adds are benign if table was freshly created by create_all (then no-ops here)
+        if item_cols:
+            if "name_snapshot" not in item_cols:
+                item_stmts.append("ALTER TABLE order_items ADD COLUMN name_snapshot VARCHAR(255)")
+            if "sku_snapshot" not in item_cols:
+                item_stmts.append("ALTER TABLE order_items ADD COLUMN sku_snapshot VARCHAR(120)")
+            if "unit_price" not in item_cols:
+                item_stmts.append("ALTER TABLE order_items ADD COLUMN unit_price FLOAT DEFAULT 0.0 NOT NULL")
+            if "quantity" not in item_cols:
+                item_stmts.append("ALTER TABLE order_items ADD COLUMN quantity INTEGER DEFAULT 0 NOT NULL")
+            if "line_total" not in item_cols:
+                item_stmts.append("ALTER TABLE order_items ADD COLUMN line_total FLOAT DEFAULT 0.0 NOT NULL")
+
+            for sql in item_stmts:
+                conn.exec_driver_sql(sql)
 
 
 # -----------------------------
@@ -378,6 +430,20 @@ def create_app():
             grand_total=grand_total,
         )
 
+    # -----------------------------
+    # ⬇️ ADDED: Orders – list + detail (non-destructive additions)
+    # -----------------------------
+    @app.route("/orders")
+    def orders_list():
+        orders = Order.query.order_by(Order.created_at.desc()).all()
+        return render_template("orders_list.html", orders=orders)
+
+    @app.route("/orders/<int:order_id>")
+    def order_detail(order_id):
+        order = Order.query.get_or_404(order_id)
+        computed_total = sum((it.line_total or 0.0) for it in order.items)
+        return render_template("order_detail.html", order=order, computed_total=computed_total)
+
     return app
 
 
@@ -388,4 +454,6 @@ if __name__ == "__main__":
     app = create_app()
     with app.app_context():
         db.create_all()
+        # ⬇️ ADDED: patch existing SQLite DBs to add any missing columns
+        _sqlite_autopatch(db.engine)
     app.run(debug=True)

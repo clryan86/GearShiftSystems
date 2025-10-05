@@ -48,22 +48,41 @@ def view_cart():
 @cart_bp.post("/update")
 def update_cart():
     cart = _get_cart()
-    if "qty" not in request.form:
-        raise BadRequest("Missing qty payload")
-    for sid, qty in request.form.getlist("item_id"):
-        pass  # (not used; kept for compatibility)
-    # Simpler: parse items[] and qty[]
+
+    # Accept either array-style ids[]/qtys[] OR individual qty[<id>] fields.
     ids = request.form.getlist("ids[]")
     qtys = request.form.getlist("qtys[]")
-    for sid, sqty in zip(ids, qtys):
-        try:
-            q = max(0, int(sqty))
-        except Exception:
-            q = 0
-        if q == 0:
-            cart.pop(sid, None)
-        else:
-            cart[sid] = q
+
+    if ids and qtys:
+        for sid, sqty in zip(ids, qtys):
+            try:
+                q = max(0, int(sqty))
+            except Exception:
+                q = 0
+            if q == 0:
+                cart.pop(sid, None)
+            else:
+                cart[sid] = q
+    else:
+        # Back-compat: qty[<id>] fields or single "qty" presence
+        any_qty = False
+        for key, val in request.form.items():
+            if key.startswith("qty[") and key.endswith("]"):
+                any_qty = True
+                sid = key[4:-1]
+                try:
+                    q = max(0, int(val))
+                except Exception:
+                    q = 0
+                if q == 0:
+                    cart.pop(sid, None)
+                else:
+                    cart[sid] = q
+
+        # If nothing parsed, keep original guard to surface bad payloads
+        if not any_qty and not ids:
+            raise BadRequest("Missing qty payload")
+
     _save_cart(cart)
     flash("Cart updated.", "success")
     return redirect(url_for("cart.view_cart"))
@@ -103,26 +122,63 @@ def checkout_view():
 
 @cart_bp.post("/checkout")
 def checkout_submit():
+    """
+    Record an Order + OrderItems, decrement inventory, then clear the cart.
+    Assumes payment has been validated (e.g., via PayPal sandbox) before this post.
+    """
+    # Local import avoids circulars at module import time
+    from models import Order, OrderItem
+
     cart = _get_cart()
     items = list(_cart_items(cart))
     if not items:
         flash("Your cart is empty.", "danger")
         return redirect(url_for("list_parts"))
 
-    # Validate stock one last time and decrement
+    # Validate stock one last time
     for part, qty, _ in items:
         if qty > (part.stock or 0):
             flash(f"Not enough stock for {part.name}.", "danger")
             return redirect(url_for("cart.view_cart"))
 
+    # Optional buyer info (only if your checkout form provides these)
+    buyer_name = (request.form.get("buyer_name") or "").strip() or None
+    buyer_email = (request.form.get("buyer_email") or "").strip() or None
+
+    # Create order
+    order = Order(status="paid", buyer_name=buyer_name, buyer_email=buyer_email, total_amount=0.0)
+    db.session.add(order)
+    db.session.flush()  # ensures order.id is available
+
+    order_total = 0.0
+
+    # Create order items
+    for part, qty, line in items:
+        oi = OrderItem(
+            order_id=order.id,
+            part_id=part.id,
+            name_snapshot=part.name,
+            sku_snapshot=part.sku,
+            unit_price=float(part.price or 0.0),
+            quantity=int(qty),
+            line_total=float(line),
+        )
+        db.session.add(oi)
+        order_total += float(line)
+
+    # Update order total
+    order.total_amount = order_total
+
+    # Decrement stock
     for part, qty, _ in items:
-        part.stock = int(part.stock or 0) - qty
+        part.stock = int(part.stock or 0) - int(qty)
+
     db.session.commit()
 
     # Clear cart
     session.pop("cart", None)
     session.modified = True
 
-    flash("Order placed. Inventory updated.", "success")
-    return redirect(url_for("list_parts"))
-
+    flash(f"Order #{order.id} placed. Inventory updated.", "success")
+    # After recording, send them to the Orders list so they can see it
+    return redirect(url_for("orders_list"))

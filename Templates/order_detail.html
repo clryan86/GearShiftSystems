@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h1>Order #{{ order.id }}</h1>
+
+  <div class="mb-3">
+    <p><strong>Date:</strong> {{ order.created_at.strftime('%Y-%m-%d %H:%M') if order.created_at else '' }}</p>
+    <p><strong>Status:</strong> {{ order.status }}</p>
+    {% if order.buyer_name %}<p><strong>Buyer:</strong> {{ order.buyer_name }}</p>{% endif %}
+    {% if order.buyer_email %}<p><strong>Email:</strong> {{ order.buyer_email }}</p>{% endif %}
+  </div>
+
+  <h3>Items</h3>
+  <table class="table table-bordered">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Name</th>
+        <th>Qty</th>
+        <th>Unit</th>
+        <th>Line Total</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for it in order.items %}
+      <tr>
+        <td>{{ it.sku_snapshot }}</td>
+        <td>{{ it.name_snapshot }}</td>
+        <td>{{ it.quantity }}</td>
+        <td>${{ '%.2f'|format(it.unit_price or 0) }}</td>
+        <td>${{ '%.2f'|format(it.line_total or 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="4" class="text-end">Total</th>
+        <th>
+          ${{ '%.2f'|format(order.total_amount or computed_total or 0) }}
+        </th>
+      </tr>
+    </tfoot>
+  </table>
+
+  <a class="btn btn-secondary" href="{{ url_for('orders_list') }}">Back to Orders</a>
+</div>
+{% endblock %}

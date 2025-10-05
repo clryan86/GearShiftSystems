@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+
+  <div class="card">
+    <div class="title">Vendors</div>
+    <div class="subtitle">Add a new vendor and manage existing ones.</div>
+
+    <!-- Add Vendor -->
+    <form class="row g-3" method="POST" action="{{ url_for('add_vendor') }}">
+      <div class="col-md-4">
+        <label class="form-label">Vendor Name *</label>
+        <input type="text" name="name" class="form-control" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Contact Email</label>
+        <input type="email" name="contact_email" class="form-control">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Phone</label>
+        <input type="text" name="phone" class="form-control">
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Add Vendor</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Vendor List -->
+  <div class="card">
+    <div class="title">All Vendors</div>
+
+    {% if vendors %}
+      <div class="table-responsive">
+        <table class="table table-dark table-striped align-middle">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Name</th>
+              <th scope="col">Email</th>
+              <th scope="col">Phone</th>
+              <th scope="col">Parts</th>
+              <th scope="col" class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in vendors %}
+            <tr>
+              <td>{{ v.id }}</td>
+              <td>{{ v.name }}</td>
+              <td class="muted">{{ v.contact_email or '-' }}</td>
+              <td class="muted">{{ v.phone or '-' }}</td>
+              <td>{{ v.parts|length }}</td>
+              <td class="text-end">
+                <form method="POST" action="{{ url_for('delete_vendor', vendor_id=v.id) }}" onsubmit="return confirm('Delete vendor {{ v.name }}?');" class="d-inline">
+                  <button class="btn btn-warn btn-sm" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted mb-0">No vendors yet — add one above.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
