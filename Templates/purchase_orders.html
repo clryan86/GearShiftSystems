@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Purchase Orders</h2>
+<table class="table">
+  <thead>
+    <tr><th>#</th><th>Vendor</th><th>Status</th><th>Created</th><th>Total</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for po in pos %}
+    <tr>
+      <td>#{{ po.id }}</td>
+      <td>{{ po.vendor.name if po.vendor else "Unassigned" }}</td>
+      <td>{{ po.status }}</td>
+      <td>{{ po.created_at.strftime("%Y-%m-%d %H:%M") if po.created_at else "" }}</td>
+      <td>${{ "%.2f"|format(po.total) }}</td>
+      <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('po_detail', po_id=po.id) }}">Open</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6"><em>No purchase orders yet.</em></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

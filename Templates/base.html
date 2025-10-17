@@ -1,29 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>GearShift Systems</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+
   <style>
+    /* ---------- Layout & Theme ---------- */
     body {
       background-color: #0d1117;
       color: #e6edf3;
       font-family: Arial, sans-serif;
       margin: 0;
-      padding-top: 70px; /* to offset navbar */
+      padding-top: 70px; /* offset for fixed navbar */
     }
+    .container {
+      max-width: 1100px;
+    }
+
+    /* ---------- Navbar ---------- */
     .navbar {
       background-color: #161b22 !important;
       border-bottom: 1px solid #30363d;
     }
-    .navbar-brand, .nav-link, .navbar-text {
+    .navbar-brand, .nav-link, .navbar-text, .navbar-toggler {
       color: #e6edf3 !important;
     }
     .nav-link.active {
       color: #58a6ff !important;
       font-weight: bold;
     }
+    .navbar-toggler {
+      border-color: #30363d;
+    }
+    .navbar-dark .navbar-toggler-icon {
+      /* visible on dark bg */
+      background-image: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='rgba(230,237,243, 0.9)' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M4 7h22M4 15h22M4 23h22'/%3E%3C/svg%3E");
+    }
+
+    /* ---------- Cards, Buttons, Badges ---------- */
     .card {
       background-color: #161b22;
       border: 1px solid #30363d;
@@ -53,66 +70,84 @@
     }
     .badge-low {
       background-color: #f85149;
-      color: white;
+      color: #fff;
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 0.8rem;
       margin-right: 6px;
     }
-    .btn-primary {
-      background-color: #238636;
-      border: none;
-    }
-    .btn-primary:hover {
-      background-color: #2ea043;
-    }
-    .btn-accent {
+
+    .btn-primary { background-color: #238636; border: none; }
+    .btn-primary:hover { background-color: #2ea043; }
+    .btn-accent { background-color: #58a6ff; color: #0d1117; border: none; }
+    .btn-accent:hover { background-color: #79c0ff; }
+    .btn-warn { background-color: #f85149; border: none; color: #fff; }
+    .btn-warn:hover { background-color: #ff6b6b; }
+
+    /* Cart badge color fix */
+    .badge-accent {
       background-color: #58a6ff;
       color: #0d1117;
-      border: none;
     }
-    .btn-accent:hover {
-      background-color: #79c0ff;
+
+    .muted { color: #8b949e; }
+
+    /* ---------- Tables ---------- */
+    .table {
+      color: #e6edf3;
+      border-color: #30363d;
     }
-    .btn-warn {
-      background-color: #f85149;
-      border: none;
-      color: white;
+    .table thead th {
+      border-bottom: 1px solid #30363d;
     }
-    .btn-warn:hover {
-      background-color: #ff6b6b;
+    .table td, .table th {
+      border-color: #30363d;
+      vertical-align: middle;
     }
-    .muted {
-      color: #8b949e;
+    .right { text-align: right; }
+
+    /* ---------- Toast area ---------- */
+    .toast {
+      background-color: #161b22;
+      border: 1px solid #30363d;
     }
   </style>
 </head>
 <body>
   <!-- Navbar -->
-  <nav class="navbar navbar-expand-lg fixed-top">
+  <nav class="navbar navbar-dark navbar-expand-lg fixed-top">
     <div class="container-fluid">
       <a class="navbar-brand" href="{{ url_for('index') }}">GearShift Systems</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
+
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav me-auto">
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('index') }}">Home</a>
+            <a class="nav-link {% if request.endpoint in ['index'] %}active{% endif %}" href="{{ url_for('index') }}">Home</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('list_parts') }}">Parts</a>
+            <a class="nav-link {% if request.endpoint in ['list_parts', 'add_part', 'edit_part'] %}active{% endif %}" href="{{ url_for('list_parts') }}">Parts</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('list_vendors') }}">Vendors</a>
+            <a class="nav-link {% if request.endpoint in ['list_vendors'] %}active{% endif %}" href="{{ url_for('list_vendors') }}">Vendors</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('orders_list') }}">Orders</a>
+            <a class="nav-link {% if request.endpoint in ['orders_list', 'order_detail'] %}active{% endif %}" href="{{ url_for('orders_list') }}">Orders</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {% if request.endpoint in ['reorder_draft'] %}active{% endif %}" href="{{ url_for('reorder_draft') }}">Reorder</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {% if request.endpoint in ['po_list', 'po_detail'] %}active{% endif %}" href="{{ url_for('po_list') }}">Purchase Orders</a>
           </li>
         </ul>
+
         <span class="navbar-text">
           <a class="nav-link" href="{{ url_for('cart.view_cart') }}">
-            Cart <span class="badge bg-accent">{{ cart_count }}</span>
+            Cart
+            <span class="badge badge-accent">{{ cart_count }}</span>
           </a>
         </span>
       </div>
@@ -124,12 +159,12 @@
       {% if messages %}
         <div class="position-fixed top-0 end-0 p-3" style="z-index: 1080;">
           {% for category, message in messages %}
-            <div class="toast align-items-center text-bg-{{ 'success' if category=='success' else 'danger' }} border-0 show">
+            <div class="toast align-items-center border-0 show text-bg-{{ 'success' if category=='success' else ('warning' if category=='warning' else ('info' if category=='info' else 'danger')) }}">
               <div class="d-flex">
                 <div class="toast-body">
                   {{ message }}
                 </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
               </div>
             </div>
           {% endfor %}
@@ -141,5 +176,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Auto-hide toasts after 4s
+    const shownToasts = document.querySelectorAll('.toast');
+    shownToasts.forEach(t => {
+      const toast = new bootstrap.Toast(t, { delay: 4000 });
+      toast.show();
+    });
+  </script>
 </body>
 </html>

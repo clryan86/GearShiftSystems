@@ -7,62 +7,71 @@
     <p class="muted" style="margin-top:10px">No low-stock items at or below threshold.</p>
     <a class="btn" href="{{ url_for('list_parts') }}">Back to Parts</a>
   {% else %}
-  <form method="post" action="{{ url_for('generate_po') }}">
-    <div class="table-wrap">
-      <table class="table">
-        <thead>
-          <tr>
-            <th><input type="checkbox" id="toggleAll" checked></th>
-            <th>Part</th>
-            <th>SKU</th>
-            <th>Vendor</th>
-            <th class="right">Stock</th>
-            <th class="right">Threshold</th>
-            <th class="right">Suggested Qty</th>
-            <th class="right">Order Qty</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in items %}
-          {% set stock_val = (p.stock|default(0, true))|int %}
-          {% set thresh_val = (p.reorder_threshold|default(0, true))|int %}
-          {% set suggested = [ (thresh_val * 2) - stock_val, 1 ] | max %}
-          <tr>
-            <td><input type="checkbox" name="part_id" value="{{ p.id }}" class="rowCheck" checked></td>
-            <td>{{ p.name }}</td>
-            <td>{{ p.sku }}</td>
-            <td>{{ p.vendor.name if p.vendor else 'Unassigned vendor' }}</td>
-            <td class="right">{{ stock_val }}</td>
-            <td class="right">{{ thresh_val }}</td>
-            <td class="right">{{ suggested }}</td>
-            <td class="right">
-              <input type="number" name="qty_{{ p.id }}" min="0" step="1" value="{{ suggested }}" style="width:90px; text-align:right;">
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <form method="post" action="{{ url_for('generate_po') }}">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="toggleAll" checked></th>
+              <th>Part</th>
+              <th>SKU</th>
+              <th>Vendor</th>
+              <th class="right">Stock</th>
+              <th class="right">Threshold</th>
+              <th class="right">Suggested Qty</th>
+              <th class="right">Order Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in items %}
+              {% set stock_val = (p.stock|default(0, true))|int %}
+              {% set thresh_val = (p.reorder_threshold|default(0, true))|int %}
+              {% set suggested = [ (thresh_val * 2) - stock_val, 1 ] | max %}
+              <tr>
+                <td><input type="checkbox" name="part_id" value="{{ p.id }}" class="rowCheck" checked></td>
+                <td>{{ p.name }}</td>
+                <td>{{ p.sku }}</td>
+                <td>{{ p.vendor.name if p.vendor else 'Unassigned vendor' }}</td>
+                <td class="right">{{ stock_val }}</td>
+                <td class="right">{{ thresh_val }}</td>
+                <td class="right">{{ suggested }}</td>
+                <td class="right">
+                  <input type="number" name="qty_{{ p.id }}" min="0" step="1" value="{{ suggested }}" style="width:90px; text-align:right;">
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
 
-    <div class="toolbar" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="btn btn-primary" type="submit">Generate PO Preview</button>
-      <button class="btn" type="submit" name="download" value="1">Download CSV Now</button>
-      <a class="btn btn-light" href="{{ url_for('list_parts') }}">Back to Parts</a>
-      <a class="btn btn-warn" href="{{ url_for('reorder_draft') }}">Refresh</a>
-    </div>
-  </form>
+      <div class="toolbar" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <!-- Preview to /reorder/po -->
+        <button class="btn btn-primary" type="submit">Generate PO Preview</button>
 
-  <script>
-    (function () {
-      const all = document.getElementById('toggleAll');
-      const rows = document.querySelectorAll('.rowCheck');
-      if (all) {
-        all.addEventListener('change', () => {
-          rows.forEach(cb => { cb.checked = all.checked; });
-        });
-      }
-    })();
-  </script>
+        <!-- FIXED: blue accent so it’s visible on dark theme -->
+        <button class="btn btn-accent" type="submit" name="download" value="1">Download CSV Now</button>
+
+        <!-- Persist POs -->
+        <button class="btn btn-success" type="submit" formaction="{{ url_for('create_pos') }}">
+          Save as Purchase Orders
+        </button>
+
+        <a class="btn btn-light" href="{{ url_for('list_parts') }}">Back to Parts</a>
+        <a class="btn btn-warn" href="{{ url_for('reorder_draft') }}">Refresh</a>
+      </div>
+    </form>
+
+    <script>
+      (function () {
+        const all = document.getElementById('toggleAll');
+        const rows = document.querySelectorAll('.rowCheck');
+        if (all) {
+          all.addEventListener('change', () => {
+            rows.forEach(cb => { cb.checked = all.checked; });
+          });
+        }
+      })();
+    </script>
   {% endif %}
 </div>
 {% endblock %}

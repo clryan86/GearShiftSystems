@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
 from sqlalchemy import Index
+from datetime import datetime
 
 db = SQLAlchemy()
 
@@ -9,7 +9,6 @@ db = SQLAlchemy()
 # -----------------------------
 class Vendor(db.Model):
     __tablename__ = "vendors"
-
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True)
     contact_email = db.Column(db.String(120))
@@ -20,7 +19,7 @@ class Vendor(db.Model):
     def __repr__(self):
         return f"<Vendor {self.name}>"
 
-    # ✨ convenience for display / JSON
+    # convenience for display / JSON
     def to_dict(self):
         return {
             "id": self.id,
@@ -36,7 +35,6 @@ class Vendor(db.Model):
 # -----------------------------
 class Part(db.Model):
     __tablename__ = "parts"
-
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     sku = db.Column(db.String(80), nullable=False, unique=True)
@@ -44,7 +42,6 @@ class Part(db.Model):
 
     # use 'stock' to match your seed data & templates
     stock = db.Column(db.Integer, nullable=False, default=0)
-
     shelf_location = db.Column(db.String(50))
     reorder_threshold = db.Column(db.Integer, nullable=False, default=5)
 
@@ -64,7 +61,7 @@ class Part(db.Model):
         except Exception:
             return False
 
-    # ✨ convenience for display / JSON
+    # convenience for display / JSON
     @property
     def in_stock(self) -> bool:
         return (self.stock or 0) > 0
@@ -96,7 +93,6 @@ def get_all_vendors():
 # -----------------------------
 class Order(db.Model):
     __tablename__ = "orders"
-
     id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -125,7 +121,7 @@ class Order(db.Model):
     def compute_total(self):
         return sum((item.line_total or 0.0) for item in self.items or [])
 
-    # ✨ convenience
+    # convenience
     @property
     def item_count(self) -> int:
         return sum(int(i.quantity or 0) for i in (self.items or []))
@@ -145,9 +141,7 @@ class Order(db.Model):
 
 class OrderItem(db.Model):
     __tablename__ = "order_items"
-
     id = db.Column(db.Integer, primary_key=True)
-
     order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
 
     # Link to the part at the time of purchase (nullable in case part is later deleted)
@@ -158,10 +152,8 @@ class OrderItem(db.Model):
     sku_snapshot = db.Column(db.String(120))
     unit_price = db.Column(db.Float, default=0.0, nullable=False)
 
-    # 🔧 IMPORTANT: Map Python attr "quantity" to DB column "qty"
-    # This fixes NOT NULL constraint errors when an existing DB has "qty" instead of "quantity".
+    # Map Python attr "quantity" to DB column "qty" to keep older DBs happy.
     quantity = db.Column("qty", db.Integer, default=0, nullable=False)
-
     line_total = db.Column(db.Float, default=0.0, nullable=False)
 
     # Small index for reporting
@@ -180,3 +172,54 @@ class OrderItem(db.Model):
             "quantity": int(self.quantity or 0),
             "line_total": float(self.line_total or 0.0),
         }
+
+
+# -----------------------------
+# Purchase Orders + Stock Movements
+# -----------------------------
+class PurchaseOrder(db.Model):
+    __tablename__ = "purchase_orders"
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True)
+    status = db.Column(db.String(32), nullable=False, default="DRAFT")  # DRAFT/APPROVED/SENT/PARTIALLY_RECEIVED/RECEIVED/CANCELED
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    approved_at = db.Column(db.DateTime)
+    sent_at = db.Column(db.DateTime)
+    received_at = db.Column(db.DateTime)
+
+    vendor = db.relationship("Vendor", lazy="joined")
+    items = db.relationship("PurchaseOrderItem", backref="po", cascade="all, delete-orphan")
+
+    @property
+    def total(self) -> float:
+        return sum((it.qty_ordered or 0) * (it.unit_cost or 0.0) for it in self.items)
+
+    @property
+    def received_total_qty(self) -> int:
+        return sum(it.qty_received or 0 for it in self.items)
+
+
+class PurchaseOrderItem(db.Model):
+    __tablename__ = "purchase_order_items"
+    id = db.Column(db.Integer, primary_key=True)
+    purchase_order_id = db.Column(db.Integer, db.ForeignKey("purchase_orders.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("parts.id"), nullable=False)
+    qty_ordered = db.Column(db.Integer, nullable=False, default=0)
+    qty_received = db.Column(db.Integer, nullable=False, default=0)
+    unit_cost = db.Column(db.Float, nullable=False, default=0.0)
+
+    product = db.relationship("Part", lazy="joined")
+
+
+class StockMovement(db.Model):
+    __tablename__ = "stock_movements"
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("parts.id"), nullable=False)
+    qty_delta = db.Column(db.Integer, nullable=False)  # +in / -out
+    reason = db.Column(db.String(32), nullable=False)  # e.g., PO_RECEIVE / SALE / ADJUST
+    ref_type = db.Column(db.String(32))
+    ref_id = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    product = db.relationship("Part", lazy="joined")

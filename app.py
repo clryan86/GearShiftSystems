@@ -1,18 +1,29 @@
 import os
+import pathlib
 from collections import defaultdict
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
-# ⬇️ ADDED: import Order, OrderItem (keeps your existing imports intact)
-from models import db, Part, Vendor, Order, OrderItem
+# ⬇️ models now include the new PO/audit tables (safe to import even before they exist)
+from models import (
+    db,
+    Part,
+    Vendor,
+    Order,
+    OrderItem,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    StockMovement,
+)
 from paypal_mini import paypal_bp            # existing PayPal mini blueprint
-from cart import cart_bp                     # <-- NEW: session cart blueprint you added
+from cart import cart_bp                     # session cart blueprint you added
+from datetime import datetime
 
 
 # -----------------------------
-# ⬇️ ADDED: SQLite autopatch helper (non-destructive)
+# SQLite autopatch helper (non-destructive)
 # -----------------------------
 def _sqlite_autopatch(engine):
     """
@@ -45,7 +56,6 @@ def _sqlite_autopatch(engine):
         item_cols = {row[1] for row in res_items.fetchall()}
 
         item_stmts = []
-        # These adds are benign if table was freshly created by create_all (then no-ops here)
         if item_cols:
             if "name_snapshot" not in item_cols:
                 item_stmts.append("ALTER TABLE order_items ADD COLUMN name_snapshot VARCHAR(255)")
@@ -77,7 +87,6 @@ def create_app():
     db.init_app(app)
 
     # ---- PayPal (minimal) ----------------------------------------------
-    # If env var not set, default to "sb" sandbox so pages still render.
     app.config.setdefault("PAYPAL_ENV", "sandbox")
     app.config.setdefault("PAYPAL_CLIENT_ID", os.getenv("PAYPAL_CLIENT_ID", "sb"))
     if "paypal" not in app.blueprints:
@@ -85,12 +94,10 @@ def create_app():
     # --------------------------------------------------------------------
 
     # ---- Cart (session-based) ------------------------------------------
-    # Provides: /cart, /cart/add/<id>, /cart/checkout, POST /cart/checkout
     if "cart" not in app.blueprints:
         app.register_blueprint(cart_bp)
 
-    # Make cart item count available to all templates
-    @app.context_processor   # <<< fixed here
+    @app.context_processor
     def inject_cart_count_global():
         cart = session.get("cart") or {}
         total_qty = 0
@@ -101,6 +108,19 @@ def create_app():
                 pass
         return {"cart_count": total_qty}
     # --------------------------------------------------------------------
+
+    # -----------------------------
+    # ADD: very simple "email" stub (writes vendor email to ./outbox and logs)
+    # -----------------------------
+    def _emit_vendor_email(po: "PurchaseOrder"):
+        outdir = pathlib.Path("outbox")
+        outdir.mkdir(exist_ok=True)
+        html = render_template("po_email.html", po=po)
+        fname = f"po_{po.id}_to_{(po.vendor.name if po.vendor else 'unassigned').replace(' ', '_')}.html"
+        fpath = outdir / fname
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"[EMAIL STUB] Vendor PO #{po.id} written to: {fpath.resolve()}")
 
     # Quick health endpoint
     @app.get("/healthz")
@@ -316,7 +336,7 @@ def create_app():
         return redirect(url_for("list_vendors"))
 
     # -----------------------------
-    # Draft Reorder (low-stock) + PO generation
+    # Draft Reorder (low-stock) + PO preview/CSV (existing behavior)
     # -----------------------------
     @app.route("/reorder/draft", methods=["GET", "POST"], endpoint="reorder_draft")
     def reorder_draft():
@@ -332,7 +352,6 @@ def create_app():
         )
         return render_template("reorder_draft.html", items=items)
 
-    # Backward-compatible endpoint name used by older templates/forms
     app.add_url_rule(
         "/reorder/draft",
         endpoint="draft_reorder",
@@ -343,7 +362,7 @@ def create_app():
     @app.route("/reorder/po", methods=["POST"])
     def generate_po():
         """
-        Build a grouped Purchase Order from selected items posted by reorder_draft.html.
+        Build a grouped Purchase Order PREVIEW from selected items posted by reorder_draft.html.
         If 'download' is present in the form, return CSV; otherwise show a preview page.
         """
         selected_ids = request.form.getlist("part_id")
@@ -431,7 +450,7 @@ def create_app():
         )
 
     # -----------------------------
-    # ⬇️ ADDED: Orders – list + detail (non-destructive additions)
+    # Orders – list + detail (existing)
     # -----------------------------
     @app.route("/orders")
     def orders_list():
@@ -444,6 +463,173 @@ def create_app():
         computed_total = sum((it.line_total or 0.0) for it in order.items)
         return render_template("order_detail.html", order=order, computed_total=computed_total)
 
+    # -----------------------------
+    # NEW: Persisted Purchase Orders lifecycle
+    # -----------------------------
+    @app.post("/pos/create")
+    def create_pos():
+        """
+        Creates persisted Purchase Orders from the same form payload used by /reorder/po.
+        Groups lines by vendor. Unassigned vendor is allowed.
+        """
+        selected_ids = request.form.getlist("part_id")
+        if not selected_ids:
+            flash("No items selected for PO.", "warning")
+            return redirect(url_for("reorder_draft"))
+
+        # Map part_id -> qty using qty_<id> fields
+        qty_map = {}
+        for pid in selected_ids:
+            try:
+                qty_map[int(pid)] = max(int(request.form.get(f"qty_{pid}", "0")), 0)
+            except Exception:
+                qty_map[int(pid)] = 0
+
+        parts = (
+            Part.query.options(joinedload(Part.vendor))
+            .filter(Part.id.in_(qty_map.keys()))
+            .order_by(Part.name.asc())
+            .all()
+        )
+
+        # Group by vendor_id (None allowed)
+        by_vendor = defaultdict(list)
+        for p in parts:
+            qty = qty_map.get(p.id, 0)
+            if qty > 0:
+                by_vendor[p.vendor_id].append((p, qty))
+
+        if not by_vendor:
+            flash("All selected items had zero quantity.", "warning")
+            return redirect(url_for("reorder_draft"))
+
+        created = []
+        for vendor_id, rows in by_vendor.items():
+            po = PurchaseOrder(vendor_id=vendor_id, status="DRAFT")
+            db.session.add(po)
+            for part, qty in rows:
+                db.session.add(
+                    PurchaseOrderItem(
+                        po=po,
+                        product_id=part.id,
+                        qty_ordered=qty,
+                        unit_cost=float(part.price or 0.0),
+                    )
+                )
+            created.append(po)
+
+        db.session.commit()
+        if len(created) == 1:
+            flash(f"Purchase Order #{created[0].id} created in DRAFT.", "success")
+            return redirect(url_for("po_detail", po_id=created[0].id))
+        else:
+            flash(f"{len(created)} Purchase Orders created in DRAFT.", "success")
+            return redirect(url_for("po_list"))
+
+    @app.get("/pos")
+    def po_list():
+        pos = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
+        return render_template("purchase_orders.html", pos=pos)
+
+    @app.get("/pos/<int:po_id>")
+    def po_detail(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        return render_template("purchase_order_detail.html", po=po)
+
+    @app.post("/pos/<int:po_id>/approve")
+    def po_approve(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status != "DRAFT":
+            flash("Only DRAFT POs can be approved.", "warning")
+            return redirect(url_for("po_detail", po_id=po.id))
+        po.status = "APPROVED"
+        po.approved_at = datetime.utcnow()
+        db.session.commit()
+        flash("PO approved.", "success")
+        return redirect(url_for("po_detail", po_id=po.id))
+
+    @app.post("/pos/<int:po_id>/send")
+    def po_send(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status not in {"APPROVED", "DRAFT"}:
+            flash("Only DRAFT or APPROVED POs can be sent.", "warning")
+            return redirect(url_for("po_detail", po_id=po.id))
+        po.status = "SENT"
+        po.sent_at = datetime.utcnow()
+        db.session.commit()
+        _emit_vendor_email(po)  # email stub: writes HTML to ./outbox
+        flash("PO sent to vendor (see ./outbox).", "success")
+        return redirect(url_for("po_detail", po_id=po.id))
+
+    @app.post("/pos/<int:po_id>/receive")
+    def po_receive(po_id):
+        """
+        Receives line items. Form fields: receive_<item.id>=<int>
+        Increments Part.stock and writes StockMovement(+).
+        """
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status not in {"SENT", "APPROVED", "PARTIALLY_RECEIVED"}:
+            flash("PO must be SENT or APPROVED to receive.", "warning")
+            return redirect(url_for("po_detail", po_id=po.id))
+
+        any_received = False
+        for it in po.items:
+            fval = request.form.get(f"receive_{it.id}", "").strip()
+            if not fval:
+                continue
+            try:
+                delta = max(int(fval), 0)
+            except Exception:
+                delta = 0
+            if delta <= 0:
+                continue
+            # Cap at remaining
+            remaining = max((it.qty_ordered or 0) - (it.qty_received or 0), 0)
+            to_apply = min(delta, remaining)
+            if to_apply <= 0:
+                continue
+            # Apply to item
+            it.qty_received = (it.qty_received or 0) + to_apply
+            # Increment stock
+            part = Part.query.get(it.product_id)
+            part.stock = int(part.stock or 0) + to_apply
+            # Stock movement audit
+            db.session.add(
+                StockMovement(
+                    product_id=part.id,
+                    qty_delta=to_apply,
+                    reason="PO_RECEIVE",
+                    ref_type="PO",
+                    ref_id=po.id,
+                )
+            )
+            any_received = True
+
+        if not any_received:
+            flash("No quantities to receive.", "info")
+            return redirect(url_for("po_detail", po_id=po.id))
+
+        # Update PO status
+        all_full = all((li.qty_received or 0) >= (li.qty_ordered or 0) for li in po.items)
+        po.status = "RECEIVED" if all_full else "PARTIALLY_RECEIVED"
+        if po.status == "RECEIVED":
+            po.received_at = datetime.utcnow()
+
+        db.session.commit()
+        flash("Receipt recorded.", "success")
+        return redirect(url_for("po_detail", po_id=po.id))
+
+    @app.post("/pos/<int:po_id>/cancel")
+    def po_cancel(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status in {"RECEIVED"}:
+            flash("Received POs cannot be canceled.", "warning")
+        else:
+            po.status = "CANCELED"
+            db.session.commit()
+            flash("PO canceled.", "info")
+        return redirect(url_for("po_detail", po_id=po.id))
+
     return app
 
 
@@ -454,6 +640,5 @@ if __name__ == "__main__":
     app = create_app()
     with app.app_context():
         db.create_all()
-        # ⬇️ ADDED: patch existing SQLite DBs to add any missing columns
         _sqlite_autopatch(db.engine)
     app.run(debug=True)
