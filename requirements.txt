@@ -1,5 +1,17 @@
-Flask
-SQLAlchemy
-Flask-SQLAlchemy
-Werkzeug
-paypalrestsdk
+# --- Core web app ---
+Flask>=2.3,<3.1
+Werkzeug>=2.3,<3.1
+Jinja2>=3.1,<3.2
+
+# --- Database / ORM ---
+SQLAlchemy>=2.0,<2.1
+Flask-SQLAlchemy>=3.1,<3.2
+
+# --- Production server (optional but recommended for Docker/Prod) ---
+gunicorn>=21.2,<22.0
+
+# --- Dev convenience (optional) ---
+python-dotenv>=1.0,<2.0
+
+# --- PayPal SDK (NOT required if you're using paypal_mini.py only) ---
+# paypalrestsdk>=1.14,<2.0
