@@ -76,13 +76,14 @@ def _sqlite_autopatch(engine):
 # App Factory
 # -----------------------------
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder="Templates")
     basedir = os.path.abspath(os.path.dirname(__file__))
+    database_uri = os.getenv("DATABASE_URL", "sqlite:///" + os.path.join(basedir, "app.db"))
 
     app.config.update(
-        SQLALCHEMY_DATABASE_URI="sqlite:///" + os.path.join(basedir, "app.db"),
+        SQLALCHEMY_DATABASE_URI=database_uri,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SECRET_KEY="dev",  # replace for production
+        SECRET_KEY=os.getenv("SECRET_KEY", "dev-change-me"),
     )
     db.init_app(app)
 
