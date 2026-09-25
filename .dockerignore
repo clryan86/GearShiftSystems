@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.sqlite
+*.sqlite3
+app.db
+outbox
+.env
